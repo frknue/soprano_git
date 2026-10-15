@@ -74,6 +74,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private var keyboardMode: KeyboardRouter.State = .normal
     /// Opens in flight, so restored tabs keep their order.
     private var pendingOpens = 0
+    /// The session restore in flight. Folders handed to the app wait for it,
+    /// so they open after the restored tabs and stay selected.
+    private var restoreTask: Task<Void, Never>?
 
     lazy var palette: CommandPalettePanel = CommandPalettePanel(themeManager: ThemeCenter.shared.manager)
     lazy var shortcutSheet = ShortcutSheetPanel()
@@ -183,7 +186,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         pendingOpens += 1
-        Task { @MainActor in
+        restoreTask = Task { @MainActor in
             for root in roots {
                 _ = await self.openRepository(at: root, inNewTab: true, reportErrors: false, select: false)
             }
@@ -193,7 +196,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             } else {
                 self.selectTab(min(max(0, selected), self.tabs.count - 1))
             }
+            self.restoreTask = nil
         }
+    }
+
+    /// Opens folders handed to the app (Finder, the Dock, `open -a`, Soprano's
+    /// Open in Soprano Git) once the session restore is done, each as its own
+    /// tab (a lone welcome tab is replaced); the last one ends up selected.
+    func openExternally(_ urls: [URL]) async {
+        await restoreTask?.value
+        for url in urls {
+            await openRepository(at: url, inNewTab: currentTab?.welcome == nil)
+        }
+        window?.makeKeyAndOrderFront(nil)
     }
 
     func newTab() {

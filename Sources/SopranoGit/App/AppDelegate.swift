@@ -57,10 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let urls = pendingURLs
         pendingURLs = []
         Task { @MainActor in
-            for url in urls {
-                await controller.openRepository(at: url, inNewTab: controller.currentTab?.welcome == nil)
-            }
-            controller.window?.makeKeyAndOrderFront(nil)
+            await controller.openExternally(urls)
         }
     }
 
