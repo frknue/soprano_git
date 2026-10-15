@@ -418,9 +418,15 @@ final class WorkspaceStatusBarView: NSView {
                 lit = true
                 text = entry.title + "…" + (entry.progress.map { "  " + $0 } ?? "")
             case .succeeded:
-                lampColor = colors.success
-                lit = false
-                text = entry.title + " — done"
+                if let note = entry.note {
+                    lampColor = colors.yellow
+                    lit = true
+                    text = entry.title + " — " + note
+                } else {
+                    lampColor = colors.success
+                    lit = false
+                    text = entry.title + " — done"
+                }
             case let .failed(message):
                 lampColor = colors.danger
                 lit = true

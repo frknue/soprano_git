@@ -32,6 +32,8 @@ final class ActivityLog {
         /// Latest progress line (fetch/pull/push).
         var progress: String?
         var outcome: Outcome
+        /// Short outcome note shown instead of "done" (e.g. a merge paused on conflicts).
+        var note: String?
     }
 
     static let capacity = 200
@@ -59,6 +61,11 @@ final class ActivityLog {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[index].outcome = outcome
         entries[index].finishedAt = Date()
+    }
+
+    func annotate(_ id: UUID, _ note: String) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].note = note
     }
 }
 
@@ -257,6 +264,14 @@ final class RepositoryController {
         guard diff != openDiff else { return }
         openDiff = diff
         emit(.openDiff)
+    }
+
+    /// Attaches a short note to the newest finished activity titled `title`
+    /// (shown in the status bar instead of "done") and emits `.activity`.
+    func annotateActivity(_ title: String, note: String) {
+        guard let entry = activity.entries.last(where: { $0.title == title && $0.outcome != .running }) else { return }
+        activity.annotate(entry.id, note)
+        emit(.activity)
     }
 
     @discardableResult
