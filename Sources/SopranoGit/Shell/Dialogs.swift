@@ -60,6 +60,13 @@ enum Dialogs {
         return nil
     }
 
+    /// Shows a message with a single OK key (Return or Esc closes it).
+    static func alert(title: String, message: String, in window: NSWindow?) async {
+        var spec = DialogSpec(title: title, message: message, confirmTitle: "OK", isDestructive: false, kind: .confirm)
+        spec.showsCancel = false
+        _ = await DialogPanel.present(spec, in: window)
+    }
+
     static func confirm(
         title: String,
         message: String,
@@ -112,6 +119,16 @@ struct DialogSpec {
     var confirmTitle: String
     var isDestructive: Bool
     var kind: Kind
+    /// False for alerts: one key, Esc behaves like Return.
+    var showsCancel = true
+
+    init(title: String, message: String?, confirmTitle: String, isDestructive: Bool, kind: Kind) {
+        self.title = title
+        self.message = message
+        self.confirmTitle = confirmTitle
+        self.isDestructive = isDestructive
+        self.kind = kind
+    }
 }
 
 enum DialogResult: Equatable {
@@ -284,11 +301,15 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         confirmButton.refusesFirstResponder = true
 
         var hints: [String] = []
-        if case .choose = spec.kind { hints.append("↑↓ j k  Move") }
-        hints.append("↵  \(spec.confirmTitle)")
-        hints.append("esc  Cancel")
+        if case .choose = spec.kind {
+            hints.append("j k  Move")
+        } else {
+            hints.append("↵  \(spec.confirmTitle)")
+        }
+        hints.append(spec.showsCancel ? "esc  Cancel" : "esc  Close")
         hintLabel.setRetroText(hints.joined(separator: "    "), color: colors.textMuted)
 
+        cancelButton.isHidden = !spec.showsCancel
         let buttons = NSStackView(views: [cancelButton, confirmButton])
         buttons.spacing = 8
         let footer = NSStackView(views: [hintLabel, NSView(), buttons])
@@ -341,16 +362,31 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
 
     // MARK: - Presentation
 
+    /// The snapshot harness turns these off: an off-screen window must not
+    /// get a sheet (AppKit drags the parent on screen) or activate the app.
+    static var presentsAsSheet = true
+    static var activatesApp = true
+
     private func show(in window: NSWindow?) {
         Self.current = self
-        if let window, window.isVisible {
+        if let window, window.isVisible, Self.presentsAsSheet {
             window.beginSheet(self) { _ in }
+        } else if let window, window.isVisible {
+            // Sheet position (top center, under the tab bar) as a child panel.
+            setFrameOrigin(NSPoint(
+                x: window.frame.midX - frame.width / 2,
+                y: window.frame.maxY - TabBarView.height - frame.height
+            ))
+            window.addChildWindow(self, ordered: .above)
+            orderFrontRegardless()
         } else {
             let anchor = window?.frame ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
             setFrameOrigin(NSPoint(x: anchor.midX - frame.width / 2, y: anchor.midY - frame.height / 2 + anchor.height * 0.12))
             level = .modalPanel
             makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            if Self.activatesApp {
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
         if let inputField {
             makeFirstResponder(inputField)
@@ -366,6 +402,7 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         if let sheetParent {
             sheetParent.endSheet(self)
         } else {
+            parent?.removeChildWindow(self)
             orderOut(nil)
         }
         if Self.current === self { Self.current = nil }
