@@ -3,8 +3,8 @@
 Keyboard-first Git client for macOS in the Soprano family: GitKraken's layout and shortcuts
 (commit graph, left ref panel, right commit panel) in Soprano's "Mission Control" chrome.
 Swift 6 + programmatic AppKit (no storyboards/xibs/SwiftUI), SPM, macOS 14+, drives the git
-CLI. Shipped as a hand-packaged `.app` via `scripts/package-app.sh`. Local repo only for
-now: no GitHub remote.
+CLI. Shipped as a hand-packaged `.app` via `scripts/package-app.sh`. GitHub:
+[`frknue/soprano_git`](https://github.com/frknue/soprano_git) (public).
 
 ## Commands
 
@@ -42,6 +42,7 @@ Never use `sudo`; report permission problems instead. Docs-only work needs no in
 
 ## Commits and changelog
 
+- Push, open PRs, or create tags only when the user asks for that remote action.
 - Short imperative subjects, `feat:` / `fix:` / `docs:` / `test:` / `chore:` prefixes.
 - User-visible changes get a line under `## [Unreleased]` in `CHANGELOG.md` (Keep a
   Changelog groups: Added, Changed, Deprecated, Removed, Fixed, Security), written for the

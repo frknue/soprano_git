@@ -17,8 +17,8 @@ graph and the everyday commands. The "cool features" follow in `docs/ROADMAP.md`
   remapping in `~/.config/soprano-git/settings.json`.
 - Packaging (`scripts/install.sh`, `scripts/dev.sh`), app icon, offscreen `snapshot`
   harness, fixture repos.
-- Soprano's `⌃A` → `G` opens the active tab's repository here (Soprano branch
-  `feat/soprano-git-command`, not merged yet).
+- Soprano's `⌃A` → `G` opens the active tab's repository here
+  ([frknue/soprano#17](https://github.com/frknue/soprano/pull/17), open).
 - Diff view: unified or split (`v`), syntax highlighting per language with Soprano's
   vendored highlighter and editor colors, 359 tests.
 
@@ -39,7 +39,6 @@ graph and the everyday commands. The "cool features" follow in `docs/ROADMAP.md`
   `.defaultLow`), then run `scripts/sync-soprano-chrome.sh`.
 - **Option chords**: Soprano's `KeyChord` rejects ⌥, so GitKraken's ⌘⌥F / ⌥T / ⌥O have
   other defaults here. Adding ⌥ support belongs in Soprano first.
-- **GitHub remote**: the repo is local only; create `frknue/soprano-git` when wanted.
 - **Shared design package**: vendoring via the sync script was chosen over extracting a
   `SopranoChrome` package; revisit if the two apps drift.
 - **Syntax colors**: the token-kind → color mapping lives on Soprano's `EditorPaneView`,
