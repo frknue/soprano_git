@@ -147,8 +147,15 @@ enum SnapshotCommand {
 
         if let repo = options.repo {
             controller.newTab()
-            await controller.openRepository(at: repo)
+            // An open error shows a dialog that waits for the user; don't await it.
+            var finishedOpening = false
+            Task { @MainActor in
+                await controller.openRepository(at: repo)
+                finishedOpening = true
+            }
             await waitUntil(timeout: 20) {
+                if let dialog = Dialogs.current, dialog.isVisible { return true }
+                guard finishedOpening else { return false }
                 guard let workspace = controller.currentWorkspace else { return true }
                 return workspace.controller.hasLoaded || workspace.controller.loadError != nil
             }
