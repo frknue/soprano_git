@@ -71,10 +71,13 @@ final class KeyHintButton: NSButton {
         needsDisplay = true
     }
 
+    /// No gap before the keycap when the title is empty (a keycap-only button).
+    private var gap: CGFloat { title.isEmpty ? 0 : Self.hintGap }
+
     override var intrinsicContentSize: NSSize {
         var width = ceil(RetroText.display(title, color: .labelColor).size().width) + Self.padding * 2
         if let hint {
-            width += Self.hintGap + capSize(for: hint).width
+            width += gap + capSize(for: hint).width
         }
         return NSSize(width: width, height: height)
     }
@@ -135,13 +138,13 @@ final class KeyHintButton: NSButton {
         var cap: NSSize = .zero
         if let hint {
             cap = capSize(for: hint)
-            contentWidth += Self.hintGap + cap.width
+            contentWidth += gap + cap.width
         }
         var x = floor((bounds.width - contentWidth) / 2)
         label.draw(at: NSPoint(x: x, y: floor((bounds.height - labelSize.height) / 2)))
         x += ceil(labelSize.width)
         if let hint {
-            x += Self.hintGap
+            x += gap
             let capRect = NSRect(x: x, y: floor((bounds.height - cap.height) / 2), width: cap.width, height: cap.height)
             palette.capEdge.setStroke()
             let edge = NSBezierPath(rect: capRect.insetBy(dx: 0.5, dy: 0.5))

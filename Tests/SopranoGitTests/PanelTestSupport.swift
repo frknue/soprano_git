@@ -15,14 +15,14 @@ final class PanelHarness {
     var panel: CommitPanelViewController { workspace.commitPanel }
     var diff: DiffViewController { workspace.diff }
 
-    private init(sandbox: GitSandbox, script: GitScript) {
+    private init(sandbox: GitSandbox, script: GitScript, state: AppStateStore) {
         self.sandbox = sandbox
         self.script = script
         DialogPanel.presentsAsSheet = false
         DialogPanel.activatesApp = false
         let controller = RepositoryController(repository: script.repository)
         controller.minimumRefreshInterval = .zero
-        workspace = RepoWorkspaceViewController(controller: controller, state: AppStateStore.volatile())
+        workspace = RepoWorkspaceViewController(controller: controller, state: state)
         window = NSWindow(
             contentRect: NSRect(x: -20000, y: -20000, width: 1400, height: 900),
             styleMask: [.titled, .resizable],
@@ -34,12 +34,13 @@ final class PanelHarness {
         window.layoutIfNeeded()
     }
 
-    /// Builds the repository with `setup`, opens it and waits for the first load.
-    static func make(_ setup: (GitScript) async throws -> Void) async throws -> PanelHarness {
+    /// Builds the repository with `setup`, opens it and waits for the first
+    /// load. `state` defaults to a throwaway store.
+    static func make(state: AppStateStore = .volatile(), _ setup: (GitScript) async throws -> Void) async throws -> PanelHarness {
         let sandbox = try GitSandbox()
         let script = GitScript(try await sandbox.makeRepository(), sandbox: sandbox)
         try await setup(script)
-        let harness = PanelHarness(sandbox: sandbox, script: script)
+        let harness = PanelHarness(sandbox: sandbox, script: script, state: state)
         harness.controller.start(watching: false)
         harness.workspace.didAttach(to: harness.window)
         try await harness.waitUntil { harness.controller.hasLoaded }

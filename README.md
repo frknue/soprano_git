@@ -55,7 +55,9 @@ tab selected.
   composer (with Amend).
 - **Diff view**: replaces the graph while a file is open. `j` / `k` move between hunks,
   `s` / `u` / `d` stage, unstage or discard the current hunk, `⇧J` / `⇧K` move to the
-  next or previous file, and `Esc` closes it.
+  next or previous file, `v` switches between the unified and the split (side-by-side)
+  view for every diff, and `Esc` closes it. Code is syntax highlighted in both views,
+  each side in the language of its own path.
 - **Banner**: while a merge, rebase, cherry-pick or revert is paused, it shows the
   conflict count with Continue (`⌃A c`), Abort (`⌃A x`) and Skip.
 - **Status bar**: `NORMAL` / `PREFIX` key mode, the running or last git operation with
@@ -129,6 +131,7 @@ in the focused panel, never while you type in a text field.
 | `⌘⇧M` | Focus the commit message |
 | `a` | Toggle amend |
 | `o` / `t` | Resolve a conflicted file with ours / theirs |
+| `v` | Toggle the split (side-by-side) diff |
 | `Esc` | Close the diff |
 
 ## Settings

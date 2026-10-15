@@ -8,7 +8,7 @@ below come after that, roughly in this order.
 ## Next
 
 - Line-level staging in the diff view (select lines, stage/unstage/discard them).
-- Split and inline (whole-file) diff layouts, syntax highlighting, ignore-whitespace toggle.
+- Inline (whole-file) diff layout and an ignore-whitespace toggle.
 - Three-way merge-conflict editor (ours / theirs / output, take hunks or lines, edit output).
 - Interactive rebase editor (reorder, pick/reword/squash/fixup/drop).
 - File history and blame (⌘⇧H to search a file).
