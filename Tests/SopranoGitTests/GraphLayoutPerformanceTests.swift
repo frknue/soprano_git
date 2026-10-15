@@ -3,7 +3,9 @@ import Testing
 @testable import SopranoGitCore
 
 struct GraphLayoutPerformanceTests {
-    @Test func layingOutOneHundredThousandCommitsTakesUnderOneAndAHalfSeconds() {
+    /// About 0.25 s alone; the bound leaves room for the parallel test run while
+    /// still failing on accidental quadratic work (minutes at this size).
+    @Test func layingOutOneHundredThousandCommitsStaysLinear() {
         let history = RandomHistory(
             seed: 99, count: 100_000, mergePercent: 10, branchPercent: 8, rootPercent: 0, stashCount: 20
         )
@@ -21,6 +23,6 @@ struct GraphLayoutPerformanceTests {
 
         print("GraphLayout 100k: layout \(layingOut), sequence \(sequencing), merges \(merges), max lanes \(layout.maxLaneCount)")
         #expect(rows.count == history.commits.count + history.stashes.count + 1)
-        #expect(layingOut < .milliseconds(1500))
+        #expect(layingOut < .seconds(5))
     }
 }

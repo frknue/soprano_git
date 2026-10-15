@@ -28,6 +28,13 @@ final class GitProcess: @unchecked Sendable {
     private var isFinished = false
     private var isCancelled = false
     private var launchError: String?
+    /// Last time either pipe delivered data; the post-exit idle check waits
+    /// for the pipes to go quiet instead of cutting off output still arriving.
+    private var lastActivity = DispatchTime.now()
+
+    /// How long the pipes must stay quiet after git exited before a child
+    /// process still holding them open is no longer waited for.
+    static let pipeIdleTimeout: Double = 0.5
 
     init(
         executable: URL,
@@ -147,6 +154,7 @@ final class GitProcess: @unchecked Sendable {
         }
         var lines: [String] = []
         lock.lock()
+        lastActivity = .now()
         if isStdout {
             stdout.append(data)
         } else {
@@ -202,10 +210,28 @@ final class GitProcess: @unchecked Sendable {
             finish()
         } else {
             // A child git spawned (an ssh ControlMaster, a hook's daemon) can
-            // hold the pipes open after git itself exited; don't wait for it.
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.finish()
-            }
+            // hold the pipes open after git itself exited; stop waiting once
+            // they have been quiet for a while, but never while data still flows.
+            scheduleIdleCheck()
+        }
+    }
+
+    private func scheduleIdleCheck() {
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.pipeIdleTimeout) { [weak self] in
+            self?.checkIdlePipes()
+        }
+    }
+
+    private func checkIdlePipes() {
+        lock.lock()
+        let quietFor = Double(DispatchTime.now().uptimeNanoseconds - lastActivity.uptimeNanoseconds) / 1_000_000_000
+        let shouldFinish = !isFinished && quietFor >= Self.pipeIdleTimeout
+        let shouldWait = !isFinished && !shouldFinish
+        lock.unlock()
+        if shouldFinish {
+            finish()
+        } else if shouldWait {
+            scheduleIdleCheck()
         }
     }
 
@@ -230,9 +256,17 @@ final class GitProcess: @unchecked Sendable {
         self.continuation = nil
         let launchError = launchError
         let cancelled = isCancelled
-        let status = hasLaunched && hasTerminated ? process.terminationStatus : -1
+        // The termination handler can fire before `run()` returns and sets
+        // `hasLaunched`; a terminated process without a launch error is real.
+        let status = hasTerminated && launchError == nil ? process.terminationStatus : -1
         let output = GitProcessOutput(stdout: stdout, stderr: stderr, exitCode: status)
+        // A final progress line without a newline is still a line.
+        let remainder = partialStderrLine
+        partialStderrLine = Data()
         lock.unlock()
+        if let onStderrLine, !remainder.isEmpty {
+            onStderrLine(String(decoding: remainder, as: UTF8.self))
+        }
         if let launchError {
             continuation.resume(throwing: GitSetupError.launchFailed(launchError))
         } else if cancelled {
