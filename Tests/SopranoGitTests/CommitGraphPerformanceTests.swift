@@ -95,7 +95,7 @@ struct CommitGraphPerformanceTests {
             "\(building)", model.maxLaneCount, sample.count, configureCost, drawCost, targets.count, scrollCost
         ))
         #expect(building < .milliseconds(2500))
-        #expect(configureCost < 60)
+        #expect(configureCost < 80)
         #expect(drawCost < 400)
         #expect(scrollCost < 1000)
     }

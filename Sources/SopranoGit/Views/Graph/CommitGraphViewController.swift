@@ -47,7 +47,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         var widthRange: ClosedRange<CGFloat> {
             switch self {
             case .refs: 60 ... 420
-            case .graph: GraphMetrics.graphWidthRange
+            case .graph: GraphMetrics.graphWidthRange.lowerBound ... 640
             case .message: 120 ... 10_000
             case .author: 60 ... 320
             case .date: 50 ... 220
@@ -475,13 +475,14 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         defer { isApplyingWidths = false }
 
         if let graph = columns[.graph], customWidths[Column.graph.rawValue] == nil {
-            let range = Column.graph.widthRange
+            let range = GraphMetrics.graphWidthRange
             let width = min(max(GraphMetrics.graphWidth(lanes: model.maxLaneCount), range.lowerBound), range.upperBound)
             if graph.width != width { graph.width = width }
         }
         if let refs = columns[.refs] {
             let stored = customWidths[Column.refs.rawValue].map { CGFloat($0) } ?? Column.refs.defaultWidth
-            let width = min(stored, max(100, floor(available * 0.3)))
+            // Narrow center areas squeeze the refs column so messages stay readable.
+            let width = available < 720 ? min(stored, max(100, floor(available * 0.3))) : stored
             if refs.width != width { refs.width = width }
         }
 
@@ -669,13 +670,13 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         if shouldReveal { reveal(row: row) }
     }
 
-    /// Scrolls `row` into view: minimally when it is partly visible, else a third
-    /// from the top so its surroundings show.
+    /// Scrolls `row` into view: minimally when it is partly visible or right next to the
+    /// visible rows (j/k at the edge), else a third from the top so its surroundings show.
     private func reveal(row: Int) {
         let visible = tableView.visibleRect
         let rect = tableView.rect(ofRow: row)
         guard visible.height > 0, !visible.contains(rect) else { return }
-        if visible.intersects(rect) {
+        if visible.insetBy(dx: 0, dy: -GraphMetrics.rowHeight).intersects(rect) {
             tableView.scrollRowToVisible(row)
         } else {
             let y = max(0, rect.minY - floor(visible.height / 3))
@@ -686,11 +687,11 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     /// Selects a row the way a click would (updates the controller) and reveals it.
     func select(row: Int) {
         guard model.entries.indices.contains(row) else { return }
+        if tableView.selectedRow != row { setTableSelection(row) }
+        reveal(row: row)
         if let selection = model.selection(at: row) {
             controller.select(selection)
         }
-        if tableView.selectedRow != row { setTableSelection(row) }
-        reveal(row: row)
     }
 
     /// The selected row, from the table or else the controller's selection.
@@ -758,6 +759,11 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     }
 
     private func checkPaging() {
+        if !controller.hasMoreCommits, !model.isComplete, controller.hasLoaded, !isBuilding {
+            // The last page can come back empty without a commits event; leftover
+            // stashes still belong at the bottom.
+            scheduleSync()
+        }
         let visible = tableView.rows(in: tableView.visibleRect)
         guard visible.length > 0 else { return }
         checkPaging(lastVisibleRow: visible.location + visible.length - 1)

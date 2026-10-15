@@ -22,6 +22,7 @@ enum GraphMetrics {
         laneInset * 2 + CGFloat(max(1, lanes)) * laneSpacing
     }
 
+    /// Automatic width range of the graph column (it follows the widest row); users may drag it wider.
     static let graphWidthRange: ClosedRange<CGFloat> = 64 ... 280
 }
 
