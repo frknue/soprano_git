@@ -368,6 +368,20 @@ final class WorkspaceStatusBarView: NSView {
         applyMode()
     }
 
+    /// The line of git's output that says what went wrong: the first
+    /// `fatal:`/`error:` line without its prefix, else the first non-empty line.
+    static func summaryLine(of message: String) -> String {
+        let lines = message.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        for prefix in ["fatal:", "error:"] {
+            if let line = lines.first(where: { $0.lowercased().hasPrefix(prefix) }) {
+                return line.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return lines.first ?? ""
+    }
+
     func setMode(_ mode: KeyboardRouter.State) {
         self.mode = mode
         applyMode()
@@ -410,7 +424,7 @@ final class WorkspaceStatusBarView: NSView {
             case let .failed(message):
                 lampColor = colors.danger
                 lit = true
-                text = entry.title + " failed: " + (message.split(separator: "\n").first.map(String.init) ?? "")
+                text = entry.title + " failed: " + Self.summaryLine(of: message)
             }
         } else if loading {
             lampColor = colors.cyan
@@ -459,7 +473,8 @@ final class ErrorToastView: NSView {
         lamp.wantsLayer = true
         lamp.layer?.cornerRadius = 4
         messageLabel.maximumNumberOfLines = 8
-        messageLabel.lineBreakMode = .byTruncatingTail
+        messageLabel.lineBreakMode = .byWordWrapping
+        messageLabel.cell?.truncatesLastVisibleLine = true
         messageLabel.isSelectable = false
         messageLabel.preferredMaxLayoutWidth = Self.width - 46
         titleLabel.lineBreakMode = .byTruncatingTail

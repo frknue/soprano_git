@@ -370,7 +370,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     func commandContext() -> CommandContext {
         let firstResponder = window?.firstResponder
-        let isTextInput = firstResponder is NSTextView || firstResponder is NSTextField
+        // Read-only text views (diff text) take single keys; editable ones type them.
+        let isTextInput = (firstResponder as? NSTextView)?.isEditable == true
+            || (firstResponder as? NSTextField)?.isEditable == true
         var focus: FocusRegion?
         switch currentTab?.content {
         case let .repository(workspace)?:

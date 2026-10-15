@@ -3,7 +3,7 @@ import SopranoGitCore
 
 /// `SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>]
 /// [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
-/// [--dialog prompt|confirm|choose|alert]`
+/// [--dialog prompt|confirm|choose|alert] [--fail <operation title>]`
 ///
 /// Builds the real main window off-screen (no Dock icon, no visible window,
 /// volatile state), loads the repository, replays `--keys` through the
@@ -20,6 +20,8 @@ enum SnapshotCommand {
         var wait: Double = 0.6
         var recent: [URL] = []
         var dialog: String?
+        /// Runs a failing operation through `controller.run` (error toast).
+        var fail: String?
     }
 
     enum OptionError: Error, CustomStringConvertible {
@@ -41,7 +43,7 @@ enum SnapshotCommand {
     static let usage = """
     usage: SopranoGit snapshot --out <png> [--repo <path>] [--size 1500x940] [--theme <id>]
                                [--keys "<chord> …"] [--wait <seconds>] [--recent <path>,…]
-                               [--dialog prompt|confirm|choose|alert]
+                               [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
     """
 
     nonisolated static func parse(_ arguments: [String]) throws -> Options {
@@ -66,6 +68,7 @@ enum SnapshotCommand {
             case "--keys": options.keys = try value(option).split(separator: " ").map(String.init)
             case "--wait": options.wait = Double(try value(option)) ?? options.wait
             case "--dialog": options.dialog = try value(option)
+            case "--fail": options.fail = try value(option)
             case "--recent":
                 options.recent = try value(option).split(separator: ",").map { fileURL(String($0)) }
             case "--size":
@@ -158,6 +161,22 @@ enum SnapshotCommand {
             presentDemoDialog(dialog, in: window)
             await settle(0.3)
         }
+        if let title = options.fail, let workspace = controller.currentWorkspace {
+            await workspace.controller.run(title, refresh: []) { _, _ in
+                throw GitError(
+                    arguments: ["push", "origin", "main"],
+                    exitCode: 1,
+                    stdout: "",
+                    stderr: """
+                    To origin.git
+                     ! [rejected]        main -> main (fetch first)
+                    error: failed to push some refs to 'origin.git'
+                    hint: Updates were rejected because the remote contains work that you do not have locally.
+                    """
+                )
+            }
+        }
+
 
         for token in options.keys {
             for event in try events(for: token, in: window) {
