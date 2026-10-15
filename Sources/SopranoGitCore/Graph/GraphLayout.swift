@@ -34,16 +34,16 @@ import Foundation
 /// - Lanes are fixed columns; a lane's color is its index. Lanes never move sideways;
 ///   freed lanes are reused by the next allocation (leftmost free first).
 /// - A node takes the leftmost lane expecting it as a first parent (a commit's first
-///   parent, or the working copy's HEAD); else a lane expecting it as a merge parent; else
-///   the leftmost lane only a stash is waiting in; else a new lane (a branch tip). Every
-///   other lane expecting it converges into it (an `.intoNode` edge) and ends.
-/// - A commit's first parent continues in the node's lane unless another lane already
-///   expects it; then the edge goes there and the node's lane ends. Every further parent
-///   goes to the lane already expecting it, else to a newly allocated lane.
-/// - The working copy and stashes (virtual nodes) are side lines: a lane opened by one of
-///   them is dashed down to its parent, and commits never route into such a lane (they
-///   keep their own line and converge at the parent's row). A virtual node whose parent
-///   is already expected routes into that lane.
+///   parent, or the working copy's HEAD); else the leftmost lane expecting it as a merge
+///   parent; else the leftmost lane a stash is waiting in; else a new lane (a branch tip).
+///   Every other lane expecting it converges into it (an `.intoNode` edge in the ending
+///   lane's color) and ends. Branches sharing a parent therefore stay straight in their
+///   own lanes until the parent's row.
+/// - A node's first parent always continues straight down the node's own lane. Every
+///   further parent (merges) bends into the solid lane already expecting it (in that
+///   lane's color), else into a newly allocated lane.
+/// - The working copy and stashes (virtual nodes) are side lines: the lane each opens is
+///   dashed down to its parent. Merge lines never join a dashed lane.
 /// - Parents not loaded yet keep their lane open past the last row; the next `append`
 ///   continues it.
 public struct GraphLayout: Sendable {
@@ -131,15 +131,23 @@ public struct GraphLayout: Sendable {
         /// Id of the node this lane runs down to.
         var expected: String
         var claim: Claim
+        /// Next lane waiting for the same id, or -1: the lanes waiting for one id form a
+        /// chain starting at `waiting[id]`.
+        var nextWaiting = -1
+        /// Set while the node it waits for is being placed.
+        var converges = false
+
+        init(expected: String, claim: Claim) {
+            self.expected = expected
+            self.claim = claim
+        }
     }
 
     /// Open lanes after the last row; nil = free slot. No trailing nils.
     private var lanes: [Lane?] = []
-    /// Solid lane waiting for each id. At most one solid lane waits for any id, because a
-    /// commit always routes a parent into the solid lane already expecting it.
-    private var solidLanes: [String: Int] = [:]
-    /// Indices of dashed lanes (working copy, stashes), ascending. Few, so scanned.
-    private var dashedLanes: [Int] = []
+    /// First lane of the chain waiting for each id. Several lanes can wait for the same
+    /// commit (branches sharing a parent); they converge at its row.
+    private var waiting: [String: Int] = [:]
 
     /// Maximum `laneCount` over every row so far; size the graph column with it.
     public private(set) var maxLaneCount = 0
@@ -161,54 +169,50 @@ public struct GraphLayout: Sendable {
 
     private mutating func place(_ node: GraphNode) -> Row {
         let topCount = lanes.count
-        let solid = solidLanes.removeValue(forKey: node.id)
-        let nodeLane = bestLane(solid: solid, id: node.id) ?? freeSlot()
+        let nodeLane: Int
+        if let first = waiting.removeValue(forKey: node.id) {
+            nodeLane = bestLane(from: first, solidOnly: false)!
+            var index = first
+            while index >= 0 {
+                lanes[index]!.converges = true
+                index = lanes[index]!.nextWaiting
+            }
+        } else {
+            nodeLane = freeSlot()
+        }
 
         var edges: [Edge] = []
         edges.reserveCapacity(topCount + node.parents.count)
 
         // Lines entering at the top: pass through, or converge into the node.
-        var hasDashedConverging = false
         for index in 0 ..< topCount {
             guard let lane = lanes[index] else { continue }
             let dashed = lane.claim.isDashed
-            if index == solid || (dashed && lane.expected == node.id) {
+            if lane.converges {
                 edges.append(Edge(.intoNode, from: index, to: nodeLane, colorLane: index, isDashed: dashed))
                 lanes[index] = nil
-                hasDashedConverging = hasDashedConverging || dashed
             } else {
                 edges.append(Edge(.passThrough, from: index, to: index, colorLane: index, isDashed: dashed))
             }
         }
-        if hasDashedConverging {
-            dashedLanes.removeAll { lanes[$0] == nil }
-        }
 
-        // Lines leaving at the bottom, one per parent.
-        if node.isVirtual {
-            for parent in node.parents {
-                if let target = bestLane(solid: solidLanes[parent], id: parent) {
-                    edges.append(Edge(.outOfNode, from: nodeLane, to: target, colorLane: nodeLane, isDashed: true))
-                } else {
-                    let lane = lanes[nodeLane] == nil ? nodeLane : freeSlot()
-                    open(lane, Lane(expected: parent, claim: node.kind == .workingCopy ? .workingCopy : .stash))
-                    edges.append(Edge(.outOfNode, from: nodeLane, to: lane, colorLane: lane, isDashed: true))
+        // Lines leaving at the bottom, one per parent. The first parent always continues
+        // in the node's lane; further parents join a solid lane already waiting for them.
+        for (position, parent) in node.parents.enumerated() {
+            if position == 0 {
+                let claim: Claim = switch node.kind {
+                case .workingCopy: .workingCopy
+                case .stash: .stash
+                case .commit, .merge: .firstParent
                 }
-            }
-        } else {
-            for (position, parent) in node.parents.enumerated() {
-                if let target = solidLanes[parent] {
-                    if position == 0 {
-                        lanes[target]!.claim = .firstParent
-                        edges.append(Edge(.outOfNode, from: nodeLane, to: target, colorLane: nodeLane))
-                    } else {
-                        edges.append(Edge(.outOfNode, from: nodeLane, to: target, colorLane: target))
-                    }
-                } else {
-                    let lane = position == 0 ? nodeLane : freeSlot()
-                    open(lane, Lane(expected: parent, claim: position == 0 ? .firstParent : .mergeParent))
-                    edges.append(Edge(.outOfNode, from: nodeLane, to: lane, colorLane: lane))
-                }
+                open(nodeLane, Lane(expected: parent, claim: claim))
+                edges.append(Edge(.outOfNode, from: nodeLane, to: nodeLane, colorLane: nodeLane, isDashed: claim.isDashed))
+            } else if let first = waiting[parent], let target = bestLane(from: first, solidOnly: true) {
+                edges.append(Edge(.outOfNode, from: nodeLane, to: target, colorLane: target))
+            } else {
+                let lane = freeSlot()
+                open(lane, Lane(expected: parent, claim: .mergeParent))
+                edges.append(Edge(.outOfNode, from: nodeLane, to: lane, colorLane: lane))
             }
         }
 
@@ -220,19 +224,21 @@ public struct GraphLayout: Sendable {
         return Row(id: node.id, kind: node.kind, lane: nodeLane, edges: edges, laneCount: laneCount, maxLaneCount: maxLaneCount)
     }
 
-    /// The lane a node with `id` lands in: the strongest claim, leftmost on ties.
-    /// `solid` is the solid lane expecting `id`, if any.
-    private func bestLane(solid: Int?, id: String) -> Int? {
-        var best = solid
-        var bestRank = solid.map { lanes[$0]!.claim.rank } ?? Int.max
-        for index in dashedLanes {
+    /// The strongest claim in the chain of lanes starting at `first`, leftmost on ties.
+    /// `solidOnly` skips dashed lanes, so a merge line never continues as a working-copy or
+    /// stash line.
+    private func bestLane(from first: Int, solidOnly: Bool) -> Int? {
+        var best: Int?
+        var bestRank = Int.max
+        var index = first
+        while index >= 0 {
             let lane = lanes[index]!
-            guard lane.expected == id else { continue }
-            let rank = lane.claim.rank
-            if rank < bestRank || (rank == bestRank && index < best!) {
+            if !(solidOnly && lane.claim.isDashed),
+               lane.claim.rank < bestRank || (lane.claim.rank == bestRank && index < best!) {
                 best = index
-                bestRank = rank
+                bestRank = lane.claim.rank
             }
+            index = lane.nextWaiting
         }
         return best
     }
@@ -250,12 +256,8 @@ public struct GraphLayout: Sendable {
 
     private mutating func open(_ index: Int, _ lane: Lane) {
         if index == lanes.count { lanes.append(nil) }
+        var lane = lane
+        lane.nextWaiting = waiting.updateValue(index, forKey: lane.expected) ?? -1
         lanes[index] = lane
-        if lane.claim.isDashed {
-            let position = dashedLanes.firstIndex { $0 > index } ?? dashedLanes.count
-            dashedLanes.insert(index, at: position)
-        } else {
-            solidLanes[lane.expected] = index
-        }
     }
 }
