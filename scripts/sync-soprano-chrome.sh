@@ -38,6 +38,7 @@ files=(
     "Sources/Soprano/Views/CommandPalettePanel.swift|Sources/SopranoGit/Vendored/CommandPalettePanel.swift"
     "Sources/Soprano/Controllers/FileSystemWatcher.swift|Sources/SopranoGit/Vendored/FileSystemWatcher.swift"
     "Sources/Soprano/Utilities/AppVersion.swift|Sources/SopranoGit/Vendored/AppVersion.swift"
+    "Sources/Soprano/Views/CodeSyntaxHighlighter.swift|Sources/SopranoGit/Vendored/CodeSyntaxHighlighter.swift"
     "Sources/Soprano/App/MainWindowSizing.swift|Sources/SopranoGit/Vendored/MainWindowSizing.swift"
     "Sources/Soprano/Resources/DepartureMono-Regular.woff2|Sources/SopranoGit/Resources/DepartureMono-Regular.woff2"
     "Support/Licenses/LICENSE-departure-mono|Support/Licenses/LICENSE-departure-mono"
