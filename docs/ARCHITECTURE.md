@@ -204,6 +204,11 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 - Surfaces: window `bgBase`, panels `bgPanel`, inputs/strips `bgRaised`, hover `bgOverlay`.
 - Rows (`Views/Common`): selection `bgSelectedStrong` + 2 pt `accent` leading rail when
   the region has focus, `bgSelected` + `railMuted` rail when not; hover `bgOverlay`.
+- Shared kit in `Views/Common`: `RetroTableView` / `RetroOutlineView` (hover tracking,
+  vend `RetroRowView`), `RetroListStyle.apply(to:theme:rowHeight:)` /
+  `makeScrollView(documentView:theme:)`, `PanelHeaderView` (`isFocused` → focus bar),
+  `KeycapView`, `RetroSearchField`, `ChangeKindBadge`, `RetroCheckbox`,
+  `DateText.format(_:style:)`. Leaf views re-style through `apply(theme:)`.
 - Headings: `RetroHeadingView` (`LOCAL ─────`). Dividers: `RetroRuleView` (double between
   toolbar and body, single hairlines `borderSubtle` between panels).
 - Focused panel: its header gets `bgRaised` + 4 pt `accent` leading bar (Soprano
