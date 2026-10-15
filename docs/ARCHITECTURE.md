@@ -186,6 +186,7 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `diff.nextHunk` / `diff.previousHunk` | Next / Previous Hunk | diff | `j` / `k` | Commit panel |
 | `diff.nextFile` / `diff.previousFile` | Next / Previous File | diff | `shift+j` / `shift+k` | Commit panel |
 | `diff.stageHunk` / `diff.unstageHunk` / `diff.discardHunk` | Stage / Unstage / Discard Hunk | diff | `s` / `u` / `d` | Commit panel |
+| `diff.toggleLayout` | Toggle Split Diff (persisted app-wide; enabled whenever a tab is open) | diff | `v` | Commit panel |
 
 ## Layout and visual design
 
@@ -216,7 +217,9 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
   `PaneHeaderView`).
 - Change kinds: modified `yellow`, added/untracked `success`, deleted/conflict `danger`,
   renamed/copied `cyan`, type change `blue`.
-- Diff tints: added `success` α0.14, removed `danger` α0.14.
+- Diff tints: added `success` α0.14, removed `danger` α0.14. Split fillers `textMuted`
+  α0.06 with a diagonal `borderSubtle` hatch; a `borderSubtle` hairline divides the sides.
+  Syntax colors use Soprano's editor mapping (`SyntaxTokenKind.color(in:)`).
 - Graph: 28 pt rows; lanes 14 pt apart, 2 pt lines; commit nodes are lamps (10 pt, merges
   7 pt hollow), HEAD gets a ring, stashes a small square, the working copy a dashed ring.
   Lane colors come from the theme. Ref pills in the first column, display face 11, square,
