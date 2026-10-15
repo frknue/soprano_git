@@ -252,7 +252,7 @@ enum GitActions {
             in: workspace.window
         ) else { return }
         let mode: MergeMode = [.fastForwardIfPossible, .noFastForward, .fastForwardOnly][choice]
-        let revision = resolved.revision
+        let revision = resolved.revision(in: controller.refs)
         let outcome = await perform(title, in: workspace, intercept: pausedOnConflicts) { repo, _ in
             try await repo.merge(revision, mode: mode)
         }
@@ -271,7 +271,7 @@ enum GitActions {
             in: workspace.window
         )
         guard confirmed else { return }
-        let revision = resolved.revision
+        let revision = resolved.revision(in: controller.refs)
         let outcome = await perform(title, in: workspace, intercept: pausedOnConflicts) { repo, _ in
             try await repo.rebase(onto: revision)
         }
@@ -617,7 +617,7 @@ enum GitActions {
     nonisolated static func conflictsAfterStash(kept: Bool) -> Intercept {
         { _, repo in
             guard let status = try? await repo.status(), !status.conflicted.isEmpty else { return nil }
-            return conflictNote(status.conflicted.count) + (kept ? ", stash kept" : "")
+            return conflictCount(status.conflicted.count) + (kept ? ", stash kept" : "")
         }
     }
 
@@ -634,7 +634,11 @@ enum GitActions {
     }
 
     nonisolated static func conflictNote(_ count: Int) -> String {
-        "paused on \(count == 1 ? "1 conflict" : "\(count) conflicts")"
+        "paused on " + conflictCount(count)
+    }
+
+    nonisolated static func conflictCount(_ count: Int) -> String {
+        count == 1 ? "1 conflict" : "\(count) conflicts"
     }
 
     // MARK: - After running

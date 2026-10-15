@@ -102,12 +102,15 @@ extension GitActions {
 @MainActor
 final class ActionMenuItem: NSMenuItem {
     let commandID: String?
+    /// The title without the shortcut column.
+    let label: String
     /// Display text of the command's first chord, nil when unbound.
     let shortcut: String?
     private let handler: (@MainActor () -> Void)?
 
     init(title: String, commandID: String?, isEnabled: Bool, handler: (@MainActor () -> Void)?) {
         self.commandID = commandID
+        self.label = title
         self.shortcut = commandID.flatMap { SettingsCenter.shared.shortcutText(for: $0) }
         self.handler = handler
         super.init(title: title, action: handler == nil ? nil : #selector(fire), keyEquivalent: "")
@@ -129,14 +132,14 @@ final class ActionMenuItem: NSMenuItem {
     static func alignShortcuts(in menu: NSMenu) {
         let font = NSFont.menuFont(ofSize: 0)
         let items = menu.items.compactMap { $0 as? ActionMenuItem }
-        let widest = items.map { ($0.title as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        let widest = items.map { ($0.label as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
         let shortcutWidth = items.compactMap(\.shortcut).map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
         let paragraph = NSMutableParagraphStyle()
         paragraph.tabStops = [NSTextTab(textAlignment: .right, location: ceil(widest + 32 + shortcutWidth))]
         for item in items {
             if let submenu = item.submenu { alignShortcuts(in: submenu) }
             guard let shortcut = item.shortcut else { continue }
-            let text = NSMutableAttributedString(string: item.title, attributes: [.font: font, .paragraphStyle: paragraph])
+            let text = NSMutableAttributedString(string: item.label, attributes: [.font: font, .paragraphStyle: paragraph])
             text.append(NSAttributedString(string: "\t" + shortcut, attributes: [
                 .font: font,
                 .paragraphStyle: paragraph,

@@ -27,7 +27,23 @@ final class TestWorkspace: RepoWorkspace {
 
     func addFocusObserver(_ owner: AnyObject, _ handler: @escaping @MainActor (FocusRegion?) -> Void) {}
 
-    func selectionProvider(for region: FocusRegion) -> SelectionTargetProvider? { nil }
+    /// What the focused area reports as its selection (see `context(focus:)`).
+    var providedTarget: SelectionTarget?
+    private lazy var provider = StubProvider(workspace: self)
+
+    func selectionProvider(for region: FocusRegion) -> SelectionTargetProvider? { provider }
+
+    /// A command context focused on `focus` whose target is `target`.
+    func context(_ target: SelectionTarget?, focus: FocusRegion = .graph) -> CommandContext {
+        providedTarget = target
+        return CommandContext(window: nil, workspace: self, focus: focus, isTextInput: false)
+    }
+
+    private final class StubProvider: SelectionTargetProvider {
+        weak var workspace: TestWorkspace?
+        init(workspace: TestWorkspace) { self.workspace = workspace }
+        var selectionTarget: SelectionTarget? { workspace?.providedTarget }
+    }
 }
 
 /// A sandbox repository (optionally cloned from a bare `origin.git`) opened

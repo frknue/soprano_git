@@ -48,14 +48,16 @@ enum ResolvedRef: Equatable {
     case tag(Tag)
     case commit(String)
 
-    /// Unambiguous revision for git (full ref names, so a tag and a branch of
-    /// the same name never mix up).
-    var revision: String {
-        switch self {
-        case let .local(branch), let .remote(branch): branch.fullName
-        case let .tag(tag): tag.fullName
-        case let .commit(id): id
+    /// Revision for git: the short name (so merge messages read "Merge branch
+    /// 'topic'"), or the full ref when another ref shares that short name.
+    func revision(in refs: RefSnapshot) -> String {
+        let (short, full): (String, String) = switch self {
+        case let .local(branch), let .remote(branch): (branch.name, branch.fullName)
+        case let .tag(tag): (tag.name, tag.fullName)
+        case let .commit(id): (id, id)
         }
+        let names = refs.localBranches.map(\.name) + refs.remoteBranches.map(\.name) + refs.tags.map(\.name)
+        return names.filter { $0 == short }.count > 1 ? full : short
     }
 
     var displayName: String {
