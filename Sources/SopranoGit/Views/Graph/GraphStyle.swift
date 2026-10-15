@@ -138,7 +138,8 @@ final class GraphStyle {
 
     /// 8–10 distinct, vivid lane colors from the theme: its accent and signal colors
     /// first, then the terminal's magenta and bright colors; near-duplicates and colors
-    /// that vanish on the panel are dropped.
+    /// that vanish on the panel are dropped. Themes with fewer distinct colors are
+    /// topped up with hue-rotated variants of their own colors.
     static func palette(for theme: AppTheme) -> [NSColor] {
         let colors = theme.colors
         let terminal = theme.terminalColors
@@ -149,20 +150,33 @@ final class GraphStyle {
             terminal.blue, terminal.cyan,
         ]
         let panel = rgb(colors.bgPanel)
-        let usable = candidates.filter { distance(rgb($0), panel) > 0.28 && saturation($0) > 0.18 }
-        for threshold in [0.22, 0.16, 0.10, 0.0] {
-            var chosen: [NSColor] = []
-            for color in usable where chosen.count < 10 {
-                let value = rgb(color)
-                if chosen.allSatisfy({ distance(rgb($0), value) > threshold }) {
-                    chosen.append(color)
-                }
-            }
-            if chosen.count >= 8 || threshold == 0 {
-                return chosen.isEmpty ? [colors.accent] : chosen
+        var chosen: [NSColor] = []
+        func addIfDistinct(_ color: NSColor, threshold: Double) {
+            let value = rgb(color)
+            guard chosen.count < 10, distance(value, panel) > 0.28,
+                  chosen.allSatisfy({ distance(rgb($0), value) > threshold })
+            else { return }
+            chosen.append(color)
+        }
+        for color in candidates where saturation(color) > 0.18 {
+            addIfDistinct(color, threshold: 0.2)
+        }
+        if chosen.isEmpty { chosen = [colors.accent] }
+        let seeds = chosen
+        for offset in [0.5, 0.25, 0.75, 0.125, 0.625, 0.375, 0.875] where chosen.count < 8 {
+            for seed in seeds where chosen.count < 8 {
+                let srgb = seed.usingColorSpace(.sRGB) ?? seed
+                let hue = (srgb.hueComponent + offset).truncatingRemainder(dividingBy: 1)
+                let variant = NSColor(
+                    hue: hue,
+                    saturation: max(srgb.saturationComponent, 0.5),
+                    brightness: max(srgb.brightnessComponent, 0.75),
+                    alpha: 1
+                )
+                addIfDistinct(variant, threshold: 0.2)
             }
         }
-        return [colors.accent]
+        return chosen
     }
 
     private static func rgb(_ color: NSColor) -> (Double, Double, Double) {
