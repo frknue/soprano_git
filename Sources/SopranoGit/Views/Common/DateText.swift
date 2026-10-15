@@ -29,12 +29,27 @@ enum DateText {
         }
     }
 
+    private struct FormatterKey: Hashable {
+        let format: String
+        let timeZone: TimeZone
+    }
+
+    /// Building a DateFormatter costs ~150 µs, more than a whole graph row; formatters
+    /// are reused (formatting is thread-safe, the cache is locked).
+    private nonisolated(unsafe) static var formatters: [FormatterKey: DateFormatter] = [:]
+    private static let formattersLock = NSLock()
+
     private static func formatter(_ format: String, timeZone: TimeZone) -> DateFormatter {
+        let key = FormatterKey(format: format, timeZone: timeZone)
+        formattersLock.lock()
+        defer { formattersLock.unlock() }
+        if let formatter = formatters[key] { return formatter }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.timeZone = timeZone
         formatter.dateFormat = format
+        formatters[key] = formatter
         return formatter
     }
 }

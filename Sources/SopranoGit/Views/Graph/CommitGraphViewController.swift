@@ -392,6 +392,12 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         }
     }
 
+    /// Shows rows laid out elsewhere (benchmarks); the next controller change rebuilds.
+    func replaceRows(with newModel: GraphRowModel) {
+        needsRebuild = true
+        applyRebuild(newModel)
+    }
+
     private func applyRebuild(_ newModel: GraphRowModel) {
         let anchor = scrollAnchor()
         model = newModel
