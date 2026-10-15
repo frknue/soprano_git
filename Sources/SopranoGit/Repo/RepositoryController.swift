@@ -129,6 +129,8 @@ final class RepositoryController {
     private var watcher: FileSystemWatcher?
     private var activationObserver: NSObjectProtocol?
     private var isStarted = false
+    /// Refresh cycles run so far (one git read round each); tests observe coalescing.
+    private(set) var refreshCycleCount = 0
 
     // Refresh coalescing: one read in flight; requests made meanwhile merge
     // into the next cycle.
@@ -150,11 +152,17 @@ final class RepositoryController {
     }
 
     func start() {
+        start(watching: true)
+    }
+
+    /// `watching: false` skips FSEvents and app-activation refreshes (tests).
+    func start(watching: Bool) {
         guard !isStarted else { return }
         isStarted = true
         Task { @MainActor [weak self] in
             await self?.refreshNow(.all)
         }
+        guard watching else { return }
         startWatching()
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -321,6 +329,7 @@ final class RepositoryController {
         pendingWaiters = []
         isRefreshing = true
         lastRefreshStart = .now
+        refreshCycleCount += 1
         Task { @MainActor [weak self] in
             guard let self else {
                 waiters.forEach { $0.resume() }
