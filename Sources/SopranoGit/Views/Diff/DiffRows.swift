@@ -423,9 +423,23 @@ final class DiffNoticeCellView: NSView, DiffRowCell {
 
 /// The strip above the diff: kind badge, path, `+a −d`, hunk position, the
 /// diff side (UNSTAGED / STAGED / commit), the layout toggle (`v` Unified /
-/// Split), and the Esc key that closes it.
+/// Split), and the Esc key that closes it. When the strip is narrow the file
+/// name is the last thing to go: first the hunk position hides, then the side
+/// chip, then the buttons drop their captions and keep only their keycaps,
+/// then the `+a −d` counts; the path truncates from the head throughout.
 final class DiffHeaderView: NSView {
     static let height: CGFloat = 32
+
+    /// How much the strip gave up to keep the file name readable.
+    enum Compaction: Int, Comparable, CaseIterable {
+        case full
+        case withoutPosition
+        case withoutSide
+        case keycapsOnly
+        case withoutCounts
+
+        static func < (lhs: Compaction, rhs: Compaction) -> Bool { lhs.rawValue < rhs.rawValue }
+    }
 
     private var theme: AppTheme
     private let focusBar = NSView()
@@ -436,19 +450,36 @@ final class DiffHeaderView: NSView {
     private let positionLabel = NSTextField(labelWithString: "")
     private let sideLabel = NSTextField(labelWithString: "")
     private let sideChip = NSView()
+    private let trailingStack = NSStackView()
     let closeButton: KeyHintButton
     /// Shows the current layout (Unified / Split) with the `diff.toggleLayout` key.
     let layoutButton: KeyHintButton
     private var side: (text: String, color: NSColor?) = ("", nil)
+    private var position = ""
+    private var layout = DiffLayout.unified
+    /// The open file's name, kept readable as "…/name" for as long as possible.
+    private var fileName = ""
+    /// `+a −d`, shown unless the strip is at its narrowest.
+    private var counts = NSAttributedString()
+    private(set) var compaction = Compaction.full
 
     var isFocused = false {
         didSet { restyle() }
     }
 
+    private static let closeTitle = "Close"
+    private static let edgeInset: CGFloat = 10
+    private static let badgeInset: CGFloat = 14
+    private static let pathGap: CGFloat = 8
+    private static let countsGap: CGFloat = 10
+    private static let trailingGap: CGFloat = 12
+    private static let itemSpacing: CGFloat = 10
+    private static let buttonSpacing: CGFloat = 6
+
     init(theme: AppTheme) {
         self.theme = theme
         badge = ChangeKindBadge(kind: .modified, theme: theme)
-        closeButton = KeyHintButton(title: "Close", hint: nil, theme: theme)
+        closeButton = KeyHintButton(title: Self.closeTitle, hint: nil, theme: theme)
         layoutButton = KeyHintButton(title: DiffLayout.unified.title, hint: nil, theme: theme)
         super.init(frame: .zero)
         wantsLayer = true
@@ -461,12 +492,19 @@ final class DiffHeaderView: NSView {
             label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
             label.setContentHuggingPriority(.required, for: .horizontal)
         }
-        // In a narrow center the hunk position gives way before the path does.
-        positionLabel.lineBreakMode = .byTruncatingTail
-        positionLabel.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(200), for: .horizontal)
         sideLabel.translatesAutoresizingMaskIntoConstraints = false
         sideChip.addSubview(sideLabel)
-        for view in [focusBar, bottomRule, badge, pathLabel, countsLabel, positionLabel, sideChip, layoutButton, closeButton] as [NSView] {
+        trailingStack.orientation = .horizontal
+        trailingStack.alignment = .centerY
+        trailingStack.spacing = Self.itemSpacing
+        trailingStack.detachesHiddenViews = true
+        trailingStack.setHuggingPriority(.required, for: .horizontal)
+        trailingStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        for view in [positionLabel, sideChip, layoutButton, closeButton] as [NSView] {
+            trailingStack.addArrangedSubview(view)
+        }
+        trailingStack.setCustomSpacing(Self.buttonSpacing, after: layoutButton)
+        for view in [focusBar, bottomRule, badge, pathLabel, countsLabel, trailingStack] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -480,25 +518,19 @@ final class DiffHeaderView: NSView {
             bottomRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottomRule.bottomAnchor.constraint(equalTo: bottomAnchor),
             bottomRule.heightAnchor.constraint(equalToConstant: 1),
-            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.badgeInset),
             badge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pathLabel.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 8),
+            pathLabel.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: Self.pathGap),
             pathLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            countsLabel.leadingAnchor.constraint(equalTo: pathLabel.trailingAnchor, constant: 10),
+            countsLabel.leadingAnchor.constraint(equalTo: pathLabel.trailingAnchor, constant: Self.countsGap),
             countsLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            positionLabel.leadingAnchor.constraint(greaterThanOrEqualTo: countsLabel.trailingAnchor, constant: 12),
-            positionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            sideChip.leadingAnchor.constraint(equalTo: positionLabel.trailingAnchor, constant: 10),
-            sideChip.centerYAnchor.constraint(equalTo: centerYAnchor),
+            trailingStack.leadingAnchor.constraint(greaterThanOrEqualTo: countsLabel.trailingAnchor, constant: Self.trailingGap),
+            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.edgeInset),
+            trailingStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             sideChip.heightAnchor.constraint(equalToConstant: 18),
             sideLabel.leadingAnchor.constraint(equalTo: sideChip.leadingAnchor, constant: 6),
             sideLabel.trailingAnchor.constraint(equalTo: sideChip.trailingAnchor, constant: -6),
             sideLabel.centerYAnchor.constraint(equalTo: sideChip.centerYAnchor),
-            layoutButton.leadingAnchor.constraint(equalTo: sideChip.trailingAnchor, constant: 10),
-            layoutButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            closeButton.leadingAnchor.constraint(equalTo: layoutButton.trailingAnchor, constant: 6),
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            closeButton.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         restyle()
     }
@@ -508,12 +540,67 @@ final class DiffHeaderView: NSView {
 
     var pathText: String { pathLabel.stringValue }
     var sideText: String { side.text }
-    var positionText: String { positionLabel.stringValue }
-    var layoutText: String { layoutButton.title }
+    var positionText: String { position }
+    var layoutText: String { layout.title }
+    var isPositionShown: Bool { !positionLabel.isHidden }
+    var isSideShown: Bool { !sideChip.isHidden }
 
     func show(layout: DiffLayout) {
-        layoutButton.title = layout.title
+        self.layout = layout
         layoutButton.setAccessibilityLabel("Toggle Split Diff (\(layout.title))")
+        updateCompaction()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateCompaction()
+    }
+
+    /// Picks the least compaction that leaves room for "…/name"; the counts
+    /// only go once even "…name" (the bare file name) no longer fits.
+    private func updateCompaction() {
+        // The label's own text insets come on top of the string width.
+        func width(_ text: String) -> CGFloat { ceil(PanelText.path(text, colors: theme.colors).size().width) + 6 }
+        let withFolder = width("…/" + fileName)
+        let bare = width("…" + fileName)
+        var chosen = Compaction.withoutCounts
+        for level in Compaction.allCases {
+            apply(level)
+            let needed = level == .keycapsOnly ? bare : withFolder
+            if level == .withoutCounts || pathRoom >= needed {
+                chosen = level
+                break
+            }
+        }
+        apply(chosen)
+        compaction = chosen
+    }
+
+    /// Width left for the path once everything else in the strip has its size.
+    private var pathRoom: CGFloat {
+        let visible = trailingStack.arrangedSubviews.filter { !$0.isHidden }
+        var trailing: CGFloat = 0
+        for (index, view) in visible.enumerated() {
+            trailing += view === sideChip ? ceil(sideLabel.intrinsicContentSize.width) + 12 : view.intrinsicContentSize.width
+            if index < visible.count - 1 {
+                trailing += view === layoutButton ? Self.buttonSpacing : Self.itemSpacing
+            }
+        }
+        let leading = Self.badgeInset + badge.intrinsicContentSize.width + Self.pathGap
+        let counts = Self.countsGap + countsLabel.intrinsicContentSize.width + Self.trailingGap
+        return bounds.width - leading - counts - trailing - Self.edgeInset
+    }
+
+    private func apply(_ level: Compaction) {
+        positionLabel.isHidden = position.isEmpty || level >= .withoutPosition
+        sideChip.isHidden = side.text.isEmpty || level >= .withoutSide
+        let captions = level < .keycapsOnly
+        let layoutTitle = captions ? layout.title : ""
+        let closeTitle = captions ? Self.closeTitle : ""
+        if layoutButton.title != layoutTitle { layoutButton.title = layoutTitle }
+        if closeButton.title != closeTitle { closeButton.title = closeTitle }
+        let shownCounts = level < .withoutCounts ? counts : NSAttributedString()
+        if countsLabel.attributedStringValue != shownCounts { countsLabel.attributedStringValue = shownCounts }
     }
 
     func update(path: String, oldPath: String?, kind: ChangeKind?, additions: Int?, deletions: Int?, showCounts: Bool,
@@ -523,10 +610,13 @@ final class DiffHeaderView: NSView {
         if let kind { badge.kind = kind }
         pathLabel.attributedStringValue = PanelText.path(path, oldPath: oldPath, colors: colors)
         pathLabel.toolTip = path
-        countsLabel.attributedStringValue = showCounts
+        fileName = path.split(separator: "/").last.map(String.init) ?? path
+        counts = showCounts
             ? PanelText.counts(additions: additions, deletions: deletions, colors: colors)
             : NSAttributedString()
+        countsLabel.attributedStringValue = counts
         positionLabel.setRetroText(position, color: colors.textMuted)
+        self.position = position
         self.side = (side, sideColor)
         restyle()
     }
@@ -550,8 +640,8 @@ final class DiffHeaderView: NSView {
         sideChip.layer?.borderColor = tint.cgColor
         sideChip.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
         sideLabel.setRetroText(side.text, color: tint)
-        sideChip.isHidden = side.text.isEmpty
         closeButton.hint = PanelText.keycap("diff.close")
         layoutButton.hint = PanelText.keycap("diff.toggleLayout")
+        updateCompaction()
     }
 }
