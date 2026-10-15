@@ -57,6 +57,7 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
         toast = ErrorToastView(theme: theme)
         super.init(nibName: nil, bundle: nil)
         sidebar.workspace = self
+        sidebar.stateDefaults = state.defaults
         graph.workspace = self
         commitPanel.workspace = self
         diff.workspace = self

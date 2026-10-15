@@ -166,7 +166,8 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `graph.search` | Search Commits | global | `cmd+f`, `/` | Graph |
 | `graph.searchNext` / `graph.searchPrevious` | Next / Previous Match | graph | `cmd+g`, `n` / `cmd+shift+g`, `shift+n` | Graph |
 | `graph.openDetails` | Focus Commit Panel | graph | `enter` | Graph |
-| `sidebar.filter` | Filter Left Panel | global; `/` in sidebar | `cmd+shift+f`, `/` | Sidebar |
+| `sidebar.filter` | Filter Left Panel | global | `cmd+shift+f` | Sidebar |
+| `sidebar.focusFilter` | Filter Left Panel | sidebar | `/` (not in palette) | Sidebar |
 | `sidebar.next` / `sidebar.previous` | Next / Previous Ref | sidebar | `j` / `k` | Sidebar |
 | `sidebar.activate` | Checkout / Reveal | sidebar | `enter` | Sidebar |
 | `sidebar.toggle` | Expand / Collapse | sidebar | `space` | Sidebar |
