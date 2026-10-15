@@ -65,7 +65,8 @@ its doc comment.
 
 ### `RepoWorkspace` (`Shell/Workspace.swift`)
 The open tab. Gives access to the four region controllers, keyboard focus
-(`focus(_:)`, `focusedRegion`), panel visibility, and selection providers.
+(`focus(_:)`, `focusedRegion`, `addFocusObserver` — region headers highlight from it),
+panel visibility, and selection providers.
 
 Region controllers (`CommitGraphViewController`, `RefSidebarViewController`,
 `CommitPanelViewController`, `DiffViewController`) keep their initializer
@@ -135,6 +136,8 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `view.toggleSidebar` | Toggle Left Panel | global | `cmd+j` | Shell |
 | `view.toggleCommitPanel` | Toggle Commit Panel | global | `cmd+k` | Shell |
 | `focus.left` / `focus.right` | Focus Panel Left / Right | sidebar, graph, detail, diff | `h`, `prefix+h` / `l`, `prefix+l` | Shell |
+| `toast.dismiss` | Dismiss Error | global (only while an error toast shows) | `escape` (not in palette) | Shell |
+| `welcome.next` / `welcome.previous` / `welcome.open` | Recent repositories | welcome | `j` / `k` / `enter` (not in palette) | Shell |
 | `repo.fetch` | Fetch All | global | `cmd+l`, `prefix+f` | Actions |
 | `repo.pull` | Pull | global | `prefix+p` | Actions |
 | `repo.push` | Push | global | `prefix+shift+p` | Actions |
@@ -217,10 +220,16 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 ## Verification harness
 
 `SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>]
-[--keys "<chord> <chord> …"] [--wait <seconds>]` builds the real main window offscreen
-(no Dock icon, no visible window, no persisted state), loads the repo, replays `--keys`
-through the keyboard router, waits for async work to settle, and writes a PNG of the
-window including open sheets/panels. Agents verify UI with it and `read` the PNG; they do
+[--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
+[--dialog prompt|confirm|choose|alert] [--fail <operation title>]` builds the real main
+window offscreen (no Dock icon, no visible window, no persisted state), loads the repo
+(welcome screen without `--repo`; `--recent` seeds its list), opens a sample dialog
+(`--dialog`) or runs a failing operation through `controller.run` (`--fail`, error
+toast), replays `--keys` through the keyboard router (into the dialog or panel while one
+is shown), waits for async work to settle, and writes a PNG of the window including
+dialogs and child panels (rendered through Core Animation, so lamps and fills are
+exact). Offscreen, dialogs show as child panels at the sheet position, since AppKit
+moves a sheet's parent on screen. Agents verify UI with it and `read` the PNG; they do
 not launch the GUI.
 
 `scripts/make-fixture-repo.sh <dir> [--conflict]` builds a disposable, deterministic repo
