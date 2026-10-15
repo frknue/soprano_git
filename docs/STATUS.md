@@ -16,13 +16,18 @@ graph and the everyday commands. The "cool features" follow in `docs/ROADMAP.md`
 - Keyboard: GitKraken shortcuts, ⌃A prefix, scoped single keys, palette, shortcut sheet,
   remapping in `~/.config/soprano-git/settings.json`.
 - Packaging (`scripts/install.sh`, `scripts/dev.sh`), app icon, offscreen `snapshot`
-  harness, fixture repos, 330+ tests.
+  harness, fixture repos.
+- Soprano's `⌃A` → `G` opens the active tab's repository here (Soprano branch
+  `feat/soprano-git-command`, not merged yet).
+- Diff view: unified or split (`v`), syntax highlighting per language with Soprano's
+  vendored highlighter and editor colors, 359 tests.
 
 ## Next
 
-1. Roadmap "Next" items, starting with line staging, split/inline diffs and the merge
-   conflict editor.
-2. Horizontal scrolling for long diff lines (they are clipped today).
+1. Roadmap "Next" items, starting with line staging, the inline (whole-file) layout and
+   the merge conflict editor.
+2. Horizontal scrolling for long diff lines (they end in "…" today), and word-level
+   change highlighting inside paired lines.
 
 ## Open decisions
 
@@ -37,3 +42,6 @@ graph and the everyday commands. The "cool features" follow in `docs/ROADMAP.md`
 - **GitHub remote**: the repo is local only; create `frknue/soprano-git` when wanted.
 - **Shared design package**: vendoring via the sync script was chosen over extracting a
   `SopranoChrome` package; revisit if the two apps drift.
+- **Syntax colors**: the token-kind → color mapping lives on Soprano's `EditorPaneView`,
+  so Soprano Git keeps an identical copy (`Views/Diff/DiffHighlights.swift`). Moving it
+  next to `CodeSyntaxHighlighter` in Soprano would let the sync script carry it too.
