@@ -19,6 +19,9 @@ protocol RepoWorkspace: AnyObject {
     var focusedRegion: FocusRegion? { get }
     /// Moves keyboard focus into an area, showing its panel if hidden.
     func focus(_ region: FocusRegion)
+    /// Handlers fire whenever the focused area changes (region headers
+    /// highlight with it), until `owner` is deallocated.
+    func addFocusObserver(_ owner: AnyObject, _ handler: @escaping @MainActor (FocusRegion?) -> Void)
 
     var isSidebarVisible: Bool { get set }
     var isCommitPanelVisible: Bool { get set }
