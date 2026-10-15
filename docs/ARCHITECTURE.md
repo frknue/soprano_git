@@ -226,11 +226,14 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 
 `SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>]
 [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
-[--dialog prompt|confirm|choose|alert] [--fail <operation title>]` builds the real main
+[--dialog prompt|confirm|choose|alert] [--fail <operation title>]
+[--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
+[--focus sidebar|graph|detail|diff]` builds the real main
 window offscreen (no Dock icon, no visible window, no persisted state), loads the repo
 (welcome screen without `--repo`; `--recent` seeds its list), opens a sample dialog
 (`--dialog`) or runs a failing operation through `controller.run` (`--fail`, error
-toast), replays `--keys` through the keyboard router (into the dialog or panel while one
+toast), applies `--select` (controller selection), `--diff` (`controller.showDiff`) and
+`--focus` (workspace focus), replays `--keys` through the keyboard router (into the dialog or panel while one
 is shown), waits for async work to settle, and writes a PNG of the window including
 dialogs and child panels (rendered through Core Animation, so lamps and fills are
 exact). Offscreen, dialogs show as child panels at the sheet position, since AppKit

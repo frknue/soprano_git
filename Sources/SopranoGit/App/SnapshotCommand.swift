@@ -3,7 +3,9 @@ import SopranoGitCore
 
 /// `SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>]
 /// [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
-/// [--dialog prompt|confirm|choose|alert] [--fail <operation title>]`
+/// [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
+/// [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
+/// [--focus sidebar|graph|detail|diff]`
 ///
 /// Builds the real main window off-screen (no Dock icon, no visible window,
 /// volatile state), loads the repository, replays `--keys` through the
@@ -22,6 +24,12 @@ enum SnapshotCommand {
         var dialog: String?
         /// Runs a failing operation through `controller.run` (error toast).
         var fail: String?
+        /// Selection applied after loading: "wip", "stash:<N>", or a commit-ish.
+        var select: String?
+        /// Diff opened after loading: "unstaged:<path>", "staged:<path>", "<commit-ish>:<path>".
+        var diff: String?
+        /// Region focused before `--keys` replay.
+        var focus: FocusRegion?
     }
 
     enum OptionError: Error, CustomStringConvertible {
@@ -29,6 +37,7 @@ enum SnapshotCommand {
         case unknownOption(String)
         case badSize(String)
         case missingOut
+        case badFocus(String)
 
         var description: String {
             switch self {
@@ -36,6 +45,7 @@ enum SnapshotCommand {
             case let .unknownOption(option): "unknown option \(option)"
             case let .badSize(value): "--size must be WIDTHxHEIGHT, got \(value)"
             case .missingOut: "--out <png> is required"
+            case let .badFocus(value): "--focus must be sidebar, graph, detail or diff, got \(value)"
             }
         }
     }
@@ -44,6 +54,8 @@ enum SnapshotCommand {
     usage: SopranoGit snapshot --out <png> [--repo <path>] [--size 1500x940] [--theme <id>]
                                [--keys "<chord> …"] [--wait <seconds>] [--recent <path>,…]
                                [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
+                               [--select wip|stash:<N>|<commit-ish>] [--focus sidebar|graph|detail|diff]
+                               [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
     """
 
     nonisolated static func parse(_ arguments: [String]) throws -> Options {
@@ -69,6 +81,12 @@ enum SnapshotCommand {
             case "--wait": options.wait = Double(try value(option)) ?? options.wait
             case "--dialog": options.dialog = try value(option)
             case "--fail": options.fail = try value(option)
+            case "--select": options.select = try value(option)
+            case "--diff": options.diff = try value(option)
+            case "--focus":
+                let text = try value(option)
+                guard let region = FocusRegion(rawValue: text), region != .welcome else { throw OptionError.badFocus(text) }
+                options.focus = region
             case "--recent":
                 options.recent = try value(option).split(separator: ",").map { fileURL(String($0)) }
             case "--size":
@@ -184,6 +202,9 @@ enum SnapshotCommand {
             }
         }
 
+        if let workspace = controller.currentWorkspace {
+            try await applyViewState(options, to: workspace)
+        }
 
         for token in options.keys {
             for event in try events(for: token, in: window) {
@@ -201,6 +222,56 @@ enum SnapshotCommand {
         let image = try render(controller: controller, window: window)
         try writePNG(image, to: options.out)
         print(options.out.path)
+    }
+
+    // MARK: - View state
+
+    /// Applies `--select`, `--diff` and `--focus` so a region can be inspected
+    /// without driving the other regions by keyboard.
+    static func applyViewState(_ options: Options, to workspace: any RepoWorkspace) async throws {
+        let controller = workspace.controller
+        if let select = options.select {
+            if select == "wip" {
+                controller.select(.workingCopy)
+            } else if select.hasPrefix("stash:"), let index = Int(select.dropFirst("stash:".count)) {
+                controller.select(.stash(index))
+            } else {
+                controller.select(.commit(try await resolveCommit(select, in: controller.repository)))
+            }
+            await settle(0.3)
+        }
+        if let diff = options.diff {
+            guard let colon = diff.firstIndex(of: ":") else {
+                throw CaptureError(description: "--diff must be <side>:<path>, got \(diff)")
+            }
+            let side = String(diff[..<colon])
+            let path = String(diff[diff.index(after: colon)...])
+            let target: DiffTarget = switch side {
+            case "unstaged": .unstaged(path: path)
+            case "staged": .staged(path: path)
+            default: .commit(id: try await resolveCommit(side, in: controller.repository), path: path)
+            }
+            controller.showDiff(OpenDiff(target: target, title: path))
+            await settle(0.3)
+        }
+        if let focus = options.focus {
+            workspace.focus(focus)
+            await settle(0.15)
+        }
+    }
+
+    private static func resolveCommit(_ revision: String, in repository: Repository) async throws -> String {
+        let result = try await repository.runner.run(
+            ["rev-parse", "--verify", "--quiet", "\(revision)^{commit}"],
+            in: repository.root,
+            isRead: true,
+            acceptedExitCodes: [0, 1]
+        )
+        let id = result.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.exitCode == 0, !id.isEmpty else {
+            throw CaptureError(description: "no commit \(revision) in \(repository.root.path)")
+        }
+        return id
     }
 
     // MARK: - Keys
