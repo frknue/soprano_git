@@ -478,7 +478,9 @@ public struct Repository: Sendable, Hashable {
         var arguments = ["push", "--progress"]
         if setUpstream { arguments.append("--set-upstream") }
         if forceWithLease { arguments.append("--force-with-lease") }
-        try await runner.stream(arguments + [remote, branch], in: root, onProgress: onProgress)
+        // Full refs so a tag with the branch's name never makes the refspec ambiguous.
+        let refspec = "refs/heads/\(branch):refs/heads/\(branch)"
+        try await runner.stream(arguments + [remote, refspec], in: root, onProgress: onProgress)
     }
 }
 
