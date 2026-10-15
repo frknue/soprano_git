@@ -203,8 +203,8 @@ struct RefSidebarTests {
 
     @Test func sidebarCommandsMatchTheBindingTable() {
         let commands = SidebarCommands.all
-        #expect(commands.map(\.id) == ["sidebar.filter", "sidebar.next", "sidebar.previous", "sidebar.activate", "sidebar.toggle"])
-        #expect(commands.map(\.defaultKeys) == [["cmd+shift+f", "/"], ["j"], ["k"], ["enter"], ["space"]])
+        #expect(commands.map(\.id) == ["sidebar.filter", "sidebar.focusFilter", "sidebar.next", "sidebar.previous", "sidebar.activate", "sidebar.toggle"])
+        #expect(commands.map(\.defaultKeys) == [["cmd+shift+f"], ["/"], ["j"], ["k"], ["enter"], ["space"]])
         #expect(commands[0].scopes.isEmpty)
         #expect(commands.dropFirst().allSatisfy { $0.scopes == [.sidebar] })
         #expect(commands.filter(\.inPalette).map(\.id) == ["sidebar.filter", "sidebar.activate", "sidebar.toggle"])

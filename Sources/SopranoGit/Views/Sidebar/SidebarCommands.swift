@@ -10,8 +10,19 @@ enum SidebarCommands {
                 id: "sidebar.filter",
                 title: "Filter Left Panel",
                 category: .navigation,
-                defaultKeys: ["cmd+shift+f", "/"],
+                defaultKeys: ["cmd+shift+f"],
                 icon: "line.3.horizontal.decrease",
+                isEnabled: { $0.workspace != nil },
+                perform: { $0.workspace?.sidebar.beginFilter() }
+            ),
+            AppCommand(
+                id: "sidebar.focusFilter",
+                title: "Filter Left Panel",
+                category: .navigation,
+                scopes: [.sidebar],
+                defaultKeys: ["/"],
+                icon: "line.3.horizontal.decrease",
+                inPalette: false,
                 isEnabled: { $0.workspace != nil },
                 perform: { $0.workspace?.sidebar.beginFilter() }
             ),
