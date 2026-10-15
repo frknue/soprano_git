@@ -469,17 +469,17 @@ public struct Repository: Sendable, Hashable {
         try await runner.stream(["pull", modeFlag, "--no-edit", "--progress"], in: root, onProgress: onProgress)
     }
 
-    /// Pushes `branch` to `remote`. `setUpstream` adds `--set-upstream`;
-    /// `forceWithLease` adds `--force-with-lease`.
+    /// Pushes `branch` to `remoteBranch` (default: the same name) on `remote`.
+    /// `setUpstream` adds `--set-upstream`; `forceWithLease` adds `--force-with-lease`.
     public func push(
-        branch: String, remote: String, setUpstream: Bool, forceWithLease: Bool,
+        branch: String, remote: String, remoteBranch: String? = nil, setUpstream: Bool, forceWithLease: Bool,
         onProgress: @escaping @Sendable (String) -> Void
     ) async throws {
         var arguments = ["push", "--progress"]
         if setUpstream { arguments.append("--set-upstream") }
         if forceWithLease { arguments.append("--force-with-lease") }
         // Full refs so a tag with the branch's name never makes the refspec ambiguous.
-        let refspec = "refs/heads/\(branch):refs/heads/\(branch)"
+        let refspec = "refs/heads/\(branch):refs/heads/\(remoteBranch ?? branch)"
         try await runner.stream(arguments + [remote, refspec], in: root, onProgress: onProgress)
     }
 }

@@ -145,6 +145,22 @@ struct GitActionsRemoteTests {
         }
     }
 
+    @Test func pushingABranchWhoseUpstreamHasAnotherNameUpdatesThatUpstream() async throws {
+        try await DialogTurn.exclusive {
+            let fixture = try await ActionFixture.make(remote: true)
+            defer { fixture.remove() }
+            try await fixture.script.git("switch", "-q", "-c", "fix")
+            try await fixture.script.git("push", "-q", "-u", "origin", "fix:feature-fix")
+            let tip = try await fixture.script.commit("Fix", ["f.txt": "f\n"])
+            await fixture.reload()
+
+            try await FlowRun { await GitActions.push(in: fixture.workspace) }.finish()
+
+            #expect(try await fixture.output("ls-remote", "origin", "refs/heads/feature-fix").hasPrefix(tip))
+            #expect(try await fixture.output("ls-remote", "origin", "refs/heads/fix").isEmpty)
+        }
+    }
+
     @Test func tagsAreCreatedAnnotatedPushedAndDeletedEverywhere() async throws {
         try await DialogTurn.exclusive {
             let fixture = try await ActionFixture.make(remote: true)

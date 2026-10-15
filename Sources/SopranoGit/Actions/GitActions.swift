@@ -496,9 +496,12 @@ enum GitActions {
         let refs = workspace.controller.refs
         let name = branch.name
         let remote: String
+        /// The branch on the remote: the upstream's name when tracking, else the same name.
+        var remoteName = name
         let setUpstream: Bool
         if let upstream = branch.upstream, let upstreamRemote = RefNames.remote(ofUpstream: upstream, refs: refs) {
             remote = upstreamRemote
+            remoteName = String(upstream.dropFirst(upstreamRemote.count + 1))
             setUpstream = false
         } else {
             let remotes = RefNames.remotes(refs)
@@ -523,20 +526,23 @@ enum GitActions {
             setUpstream = true
         }
 
-        let outcome = await perform("Push \(name)", in: workspace, intercept: rejectedPush) { repo, progress in
-            try await repo.push(branch: name, remote: remote, setUpstream: setUpstream, forceWithLease: false, onProgress: progress)
+        let outcome = await perform("Push \(name)", in: workspace, intercept: rejectedPush) { [remoteName] repo, progress in
+            try await repo.push(
+                branch: name, remote: remote, remoteBranch: remoteName, setUpstream: setUpstream, forceWithLease: false,
+                onProgress: progress
+            )
         }
         guard case .intercepted = outcome else { return }
 
         let isCurrent = branch.isHead
         let choice = await Dialogs.choose(
             title: "Push Rejected",
-            message: "\(remote)/\(name) has commits that \(name) doesn't. Integrate them first, or force push with lease: it replaces \(remote)/\(name) unless someone pushed since your last fetch.",
+            message: "\(remote)/\(remoteName) has commits that \(name) doesn't. Integrate them first, or force push with lease: it replaces \(remote)/\(remoteName) unless someone pushed since your last fetch.",
             options: [
                 isCurrent
                     ? DialogOption(title: "Pull First", detail: "Bring the remote commits into \(name)", key: "p")
-                    : DialogOption(title: "Fetch First", detail: "Update \(remote)/\(name) to see what's there", key: "p"),
-                DialogOption(title: "Force Push with Lease", detail: "Replace \(remote)/\(name) with \(name)", key: "f", isDestructive: true),
+                    : DialogOption(title: "Fetch First", detail: "Update \(remote)/\(remoteName) to see what's there", key: "p"),
+                DialogOption(title: "Force Push with Lease", detail: "Replace \(remote)/\(remoteName) with \(name)", key: "f", isDestructive: true),
             ],
             in: workspace.window
         )
@@ -544,8 +550,11 @@ enum GitActions {
         case 0?:
             if isCurrent { await pull(in: workspace) } else { await fetch(in: workspace) }
         case 1?:
-            await perform("Force Push \(name)", in: workspace) { repo, progress in
-                try await repo.push(branch: name, remote: remote, setUpstream: setUpstream, forceWithLease: true, onProgress: progress)
+            await perform("Force Push \(name)", in: workspace) { [remoteName] repo, progress in
+                try await repo.push(
+                    branch: name, remote: remote, remoteBranch: remoteName, setUpstream: setUpstream, forceWithLease: true,
+                    onProgress: progress
+                )
             }
         default:
             break
