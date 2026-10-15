@@ -162,6 +162,8 @@ struct GraphLayoutInvariantTests {
         for (index, node) in nodes.enumerated() {
             let outgoing = rows[index].edges.filter { $0.span == .outOfNode }
             #expect(outgoing.count == node.parents.count)
+            // The first parent always continues straight down the node's own lane.
+            #expect(outgoing.first.map { $0.to == rows[index].lane } ?? true, "\(node.id) first parent")
             for (parent, edge) in zip(node.parents, outgoing) {
                 #expect(edge.isDashed == node.isVirtual)
                 var lane = edge.to
