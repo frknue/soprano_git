@@ -365,6 +365,9 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
 
     var files: [PanelFile] { rows.compactMap(\.file) }
 
+    /// Whether any file row is listed (cached; checked on every key press).
+    private(set) var hasFiles = false
+
     /// Replaces the rows, keeping the selected file (by section and path), or
     /// the same position when it moved away (staging a file selects the next).
     private func setRows(_ newRows: [PanelRow], resetSelection: Bool = false) {
@@ -372,6 +375,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         let previousRow = tableView.selectedRow
         let changed = newRows != rows
         rows = newRows
+        if changed { hasFiles = newRows.contains { $0.file != nil } }
         if changed { tableView.reloadData() }
         updateMessage()
         if resetSelection {
@@ -407,10 +411,13 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     }
 
     private func row(for target: DiffTarget, title: String) -> Int? {
-        rows.indices.first { index in
-            guard let file = rows[index].file else { return false }
-            return PanelRows.diffTarget(for: file, in: mode) == target && file.path == title
+        func matches(_ index: Int) -> Bool {
+            guard rows.indices.contains(index), let file = rows[index].file else { return false }
+            return file.path == title && PanelRows.diffTarget(for: file, in: mode) == target
         }
+        // The open diff is nearly always the selected row; scan only otherwise.
+        if matches(tableView.selectedRow) { return tableView.selectedRow }
+        return rows.indices.first(where: matches)
     }
 
     private func openDiffRow() -> Int? {
@@ -657,14 +664,29 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
 
     // MARK: - Composer
 
+    /// Staged and conflicted counts of `countedStatus`, recomputed only when
+    /// the status changes (the composer asks on every keystroke).
+    private var statusCounts = (staged: 0, conflicts: 0)
+    private var countedStatus: WorkingTreeStatus?
+
     var composerState: ComposerState {
         let status = controller.status
+        if countedStatus != status {
+            var staged = 0
+            var conflicts = 0
+            for entry in status.entries {
+                if entry.staged != nil { staged += 1 }
+                if entry.conflict != nil { conflicts += 1 }
+            }
+            statusCounts = (staged, conflicts)
+            countedStatus = status
+        }
         var isMerging = false
         if case .merge = status.operation { isMerging = true }
         return ComposerState(
-            stagedCount: status.staged.count,
+            stagedCount: statusCounts.staged,
             changeCount: status.entries.count,
-            conflictCount: status.conflicted.count,
+            conflictCount: statusCounts.conflicts,
             isAmending: composer.isAmending,
             hasSummary: composer.hasSummary,
             isBusy: isCommitting,
@@ -796,13 +818,13 @@ enum CommitPanelCommands {
             AppCommand(
                 id: "panel.next", title: "Next File", category: .navigation,
                 scopes: [.detail], defaultKeys: ["j"], icon: "arrow.down", inPalette: false,
-                isEnabled: { !(panel($0)?.files.isEmpty ?? true) },
+                isEnabled: { panel($0)?.hasFiles ?? false },
                 perform: { panel($0)?.moveSelection(by: 1) }
             ),
             AppCommand(
                 id: "panel.previous", title: "Previous File", category: .navigation,
                 scopes: [.detail], defaultKeys: ["k"], icon: "arrow.up", inPalette: false,
-                isEnabled: { !(panel($0)?.files.isEmpty ?? true) },
+                isEnabled: { panel($0)?.hasFiles ?? false },
                 perform: { panel($0)?.moveSelection(by: -1) }
             ),
             AppCommand(
@@ -814,7 +836,7 @@ enum CommitPanelCommands {
             AppCommand(
                 id: "diff.openSelected", title: "Open Diff of Selected File", category: .view,
                 defaultKeys: ["cmd+d"], icon: "doc.text.magnifyingglass",
-                isEnabled: { !(panel($0)?.files.isEmpty ?? true) },
+                isEnabled: { panel($0)?.hasFiles ?? false },
                 perform: { panel($0)?.openSelectedFile() }
             ),
             AppCommand(
