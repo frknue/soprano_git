@@ -34,8 +34,8 @@ enum GraphCommands {
             AppCommand(
                 id: "graph.search", title: "Search Commits", category: .graph,
                 defaultKeys: ["cmd+f", "/"], icon: "magnifyingglass",
-                // `/` in the sidebar is its filter (sidebar.filter, also global).
-                isEnabled: { $0.workspace != nil && $0.focus != .sidebar },
+                // In the sidebar, `/` goes to its sidebar-scoped filter (region beats global).
+                isEnabled: { $0.workspace != nil },
                 perform: { context in
                     guard let workspace = context.workspace else { return }
                     workspace.focus(.graph)

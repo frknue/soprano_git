@@ -27,43 +27,47 @@ struct CommitPanelStagingTests {
     }
 
     @Test func discardingAfterConfirmingRestoresTrackedFilesAndDeletesUntrackedOnes() async throws {
-        let harness = try await PanelHarness.make { script in
-            try await script.commit("first", ["a.txt": "one\n"])
-            try script.write("a.txt", "changed\n")
-            try script.write("new.txt", "scratch\n")
+        try await DialogTurn.exclusive {
+            let harness = try await PanelHarness.make { script in
+                try await script.commit("first", ["a.txt": "one\n"])
+                try script.write("a.txt", "changed\n")
+                try script.write("new.txt", "scratch\n")
+            }
+            defer { harness.close() }
+            try await harness.showWorkingCopy()
+
+            try harness.selectFile("new.txt", in: .unstaged)
+            #expect(try harness.perform("wip.discardFile"))
+            try await harness.confirmDialog()
+            try await harness.waitUntil { harness.entry("new.txt") == nil }
+            #expect(!harness.script.exists("new.txt"))
+
+            try harness.selectFile("a.txt", in: .unstaged)
+            #expect(try harness.perform("wip.discardFile"))
+            try await harness.confirmDialog()
+            try await harness.waitUntil { harness.controller.status.isClean }
+            #expect(try harness.script.read("a.txt") == "one\n")
         }
-        defer { harness.close() }
-        try await harness.showWorkingCopy()
-
-        try harness.selectFile("new.txt", in: .unstaged)
-        #expect(try harness.perform("wip.discardFile"))
-        try await harness.confirmDialog()
-        try await harness.waitUntil { harness.entry("new.txt") == nil }
-        #expect(!harness.script.exists("new.txt"))
-
-        try harness.selectFile("a.txt", in: .unstaged)
-        #expect(try harness.perform("wip.discardFile"))
-        try await harness.confirmDialog()
-        try await harness.waitUntil { harness.controller.status.isClean }
-        #expect(try harness.script.read("a.txt") == "one\n")
     }
 
     @Test func cancellingTheDiscardDialogKeepsTheChange() async throws {
-        let harness = try await PanelHarness.make { script in
-            try await script.commit("first", ["a.txt": "one\n"])
-            try script.write("a.txt", "changed\n")
-        }
-        defer { harness.close() }
-        try await harness.showWorkingCopy()
+        try await DialogTurn.exclusive {
+            let harness = try await PanelHarness.make { script in
+                try await script.commit("first", ["a.txt": "one\n"])
+                try script.write("a.txt", "changed\n")
+            }
+            defer { harness.close() }
+            try await harness.showWorkingCopy()
 
-        try harness.selectFile("a.txt", in: .unstaged)
-        #expect(try harness.perform("wip.discardFile"))
-        try await harness.waitUntil { Dialogs.current?.isVisible == true }
-        Dialogs.current?.finish(.cancelled)
-        try await harness.waitUntil { Dialogs.current == nil }
-        await harness.controller.refreshNow(.status)
-        #expect(try harness.script.read("a.txt") == "changed\n")
-        #expect(harness.entry("a.txt")?.unstaged == .modified)
+            try harness.selectFile("a.txt", in: .unstaged)
+            #expect(try harness.perform("wip.discardFile"))
+            try await harness.waitUntil { Dialogs.current?.isVisible == true }
+            Dialogs.current?.finish(.cancelled)
+            try await harness.waitUntil { Dialogs.current == nil }
+            await harness.controller.refreshNow(.status)
+            #expect(try harness.script.read("a.txt") == "changed\n")
+            #expect(harness.entry("a.txt")?.unstaged == .modified)
+        }
     }
 
     @Test func fileCommandsOnlyApplyToTheirSection() async throws {

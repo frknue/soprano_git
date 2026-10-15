@@ -81,18 +81,20 @@ struct DiffHunkTests {
     }
 
     @Test func discardingAHunkAsksThenRestoresThatPartOfTheWorktree() async throws {
-        let harness = try await makeTwoHunkHarness()
-        defer { harness.close() }
-        try await open(.unstaged(path: "f.txt"), in: harness)
+        try await DialogTurn.exclusive {
+            let harness = try await makeTwoHunkHarness()
+            defer { harness.close() }
+            try await open(.unstaged(path: "f.txt"), in: harness)
 
-        #expect(try harness.perform("diff.nextHunk", focus: .diff))
-        #expect(try harness.perform("diff.discardHunk", focus: .diff))
-        try await harness.confirmDialog()
-        try await harness.waitUntil { harness.diff.document.hunkCount == 1 }
-        let contents = try harness.script.read("f.txt")
-        #expect(contents.contains("line 2 changed"))
-        #expect(!contents.contains("line 18 changed"))
-        #expect(hunkTexts(harness) == ["line 2 changed"])
+            #expect(try harness.perform("diff.nextHunk", focus: .diff))
+            #expect(try harness.perform("diff.discardHunk", focus: .diff))
+            try await harness.confirmDialog()
+            try await harness.waitUntil { harness.diff.document.hunkCount == 1 }
+            let contents = try harness.script.read("f.txt")
+            #expect(contents.contains("line 2 changed"))
+            #expect(!contents.contains("line 18 changed"))
+            #expect(hunkTexts(harness) == ["line 2 changed"])
+        }
     }
 
     @Test func stagingTheLastHunkClosesTheDiffAndFocusesTheCommitPanel() async throws {
