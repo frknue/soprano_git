@@ -254,7 +254,7 @@ final class SettingsCenter {
 
     /// Opens settings.json in the user's editor, creating it first if needed.
     func openInEditor() {
-        try? SettingsFile.createIfMissing(at: fileURL)
+        _ = try? SettingsFile.createIfMissing(at: fileURL)
         let workspace = NSWorkspace.shared
         if let editor = workspace.urlForApplication(toOpen: fileURL) {
             workspace.open([fileURL], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration())

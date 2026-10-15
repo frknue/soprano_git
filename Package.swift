@@ -14,6 +14,7 @@ let package = Package(
             name: "SopranoGit",
             dependencies: ["SopranoGitCore"],
             path: "Sources/SopranoGit",
+            exclude: ["Vendored/SOPRANO_COMMIT"],
             resources: [
                 .copy("Resources/DepartureMono-Regular.woff2"),
                 .copy("Resources/AppIcon.icns"),

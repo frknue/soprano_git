@@ -358,10 +358,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         panel.message = "Choose a Git repository"
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else { return }
-            MainActor.assumeIsolated {
-                Task { @MainActor in
-                    _ = await self?.openRepository(at: url)
-                }
+            Task { @MainActor in
+                _ = await self?.openRepository(at: url)
             }
         }
     }
