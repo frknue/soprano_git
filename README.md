@@ -24,6 +24,10 @@ the window or the Dock icon, or from a terminal:
 open -a "Soprano Git" .
 ```
 
+In Soprano, `⌃A` → `G` (**Open in Soprano Git**, also in its command palette) opens the
+repository of the active terminal tab. A repository that is already open just gets its
+tab selected.
+
 ## The first five minutes
 
 1. `⌘O` and pick a repository, or press `Enter` on one of the recent repositories.
