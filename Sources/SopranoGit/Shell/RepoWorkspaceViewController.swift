@@ -62,6 +62,7 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
         commitPanel.workspace = self
         graph.defaults = state.defaults
         diff.workspace = self
+        diff.state = state
     }
 
     @available(*, unavailable)

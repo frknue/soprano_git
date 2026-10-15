@@ -2,18 +2,35 @@ import AppKit
 import SopranoGitCore
 
 /// Center area while `controller.openDiff` is set: the file's hunks with line
-/// numbers and hunk staging. Owned by the Commit Panel module (Wave B).
+/// numbers and hunk staging, unified or split (`layout`, app-wide), syntax
+/// colored once the whole-file highlight arrives. Owned by the Commit Panel module.
 @MainActor
 final class DiffViewController: NSViewController, FocusRegionController, NSTableViewDataSource, NSTableViewDelegate {
     let controller: RepositoryController
     /// Set by the workspace right after creating the controller.
     weak var workspace: (any RepoWorkspace)?
+    /// The app-wide layout store; set once by the workspace right after
+    /// creating the controller. Without one the layout is not persisted.
+    var state: AppStateStore? {
+        didSet {
+            guard let state else { return }
+            setLayout(state.diffLayout)
+            state.addDiffLayoutObserver(self) { [weak self] layout in
+                self?.setLayout(layout)
+            }
+        }
+    }
 
     /// Where ⌘C puts the current hunk (tests use a private pasteboard).
     var pasteboard: NSPasteboard = .general
 
     private var theme = ThemeCenter.shared.theme
     private(set) var document = DiffDocument.empty
+    private(set) var layout: DiffLayout = .unified
+    /// Syntax colors of the loaded document; empty until they arrive.
+    private(set) var highlights = DiffHighlights.none
+    /// A whole-file highlight for the loaded document is being computed.
+    private(set) var isHighlighting = false
     /// Index into `document.file.hunks` of the hunk j/k and the hunk keys act on.
     private(set) var currentHunk: Int?
     /// The diff `document` was loaded for.
@@ -22,7 +39,8 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     private(set) var loadError: String?
     /// The open file is unmerged: hunks cannot be staged from git's combined diff.
     private(set) var isConflicted = false
-    private var loadGeneration = 0
+    /// Bumped by every load; results (documents, highlights) of older loads are dropped.
+    private(set) var loadGeneration = 0
     private var style: DiffRowStyle
 
     private let header: DiffHeaderView
@@ -62,6 +80,9 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
 
         header.closeButton.target = self
         header.closeButton.action = #selector(closeClicked)
+        header.layoutButton.target = self
+        header.layoutButton.action = #selector(layoutClicked)
+        header.show(layout: layout)
 
         noticeLabel.alignment = .center
         for view in [header, scrollView!, noticeLabel] as [NSView] {
@@ -139,6 +160,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             guard let open = controller.openDiff else {
                 loadGeneration += 1
                 loadedDiff = nil
+                isHighlighting = false
                 return
             }
             if open != loadedDiff {
@@ -158,7 +180,9 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     }
 
     /// Loads the open diff. A refresh keeps the current hunk's position and
-    /// closes the diff when the file has no changes left on its side.
+    /// closes the diff when the file has no changes left on its side. The
+    /// rows of both layouts are built off the main thread; syntax colors
+    /// follow (`highlights`).
     func reload(isRefresh: Bool) async {
         guard isViewLoaded, let open = controller.openDiff else { return }
         loadGeneration += 1
@@ -171,26 +195,32 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             isLoading = true
             loadError = nil
             document = .empty
+            highlights = .none
+            isHighlighting = false
             currentHunk = nil
             loadedDiff = open
             tableView.reloadData()
             updateHeader()
             updateNotice()
         }
+        let target = open.target
+        let title = open.title
         let result = await RepositoryController.capture {
-            try await repository.diff(open.target, contextLines: contextLines)
+            DiffDocument.build(files: try await repository.diff(target, contextLines: contextLines), title: title)
         }
         guard generation == loadGeneration, controller.openDiff == open else { return }
         isLoading = false
         loadedDiff = open
         isConflicted = conflicted
+        // A refresh that changed nothing keeps its colors while they are recomputed.
+        var keepsColors = false
         switch result {
-        case let .success(files):
-            let next = DiffDocument.build(files: files, title: open.title)
+        case let .success(next):
             if isRefresh, next.file == nil {
                 closeAfterLastChange()
                 return
             }
+            keepsColors = isRefresh && next == document
             let previous = currentHunk
             document = next
             loadError = nil
@@ -206,6 +236,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             currentHunk = nil
             loadError = RepositoryController.message(for: error)
         }
+        startHighlighting(open, generation: generation, keepingColors: keepsColors)
         rebuildStyle()
         tableView.reloadData()
         updateHeader()
@@ -215,6 +246,45 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         } else {
             tableView.scrollRowToVisible(0)
         }
+    }
+
+    /// Shows the document uncolored (unless `keepingColors`) and computes its
+    /// colors off the main thread from a full-context diff of the same target,
+    /// so constructs opened outside the hunks (block comments, strings) color
+    /// correctly.
+    private func startHighlighting(_ open: OpenDiff, generation: Int, keepingColors: Bool) {
+        if !keepingColors { highlights = .none }
+        guard DiffHighlights.applies(to: document, isConflicted: isConflicted) else {
+            isHighlighting = false
+            return
+        }
+        isHighlighting = true
+        let repository = controller.repository
+        let target = open.target
+        let title = open.title
+        Task { [weak self] in
+            let result = await RepositoryController.capture {
+                let files = try await repository.diff(target, contextLines: Int(Int32.max))
+                return DiffDocument.pick(files, title: title).map(DiffHighlights.compute(file:)) ?? .none
+            }
+            self?.applyHighlights((try? result.get()) ?? .none, generation: generation)
+        }
+    }
+
+    /// Applies colors computed for load `generation`; a later load (another
+    /// file, a reload after hunk staging) makes them stale and they are dropped.
+    @discardableResult
+    func applyHighlights(_ next: DiffHighlights, generation: Int) -> Bool {
+        guard generation == loadGeneration, loadedDiff != nil, controller.openDiff == loadedDiff else { return false }
+        isHighlighting = false
+        guard next != highlights else { return true }
+        highlights = next
+        tableView.enumerateAvailableRowViews { rowView, row in
+            if let cell = rowView.view(atColumn: 0) as? NSView {
+                configureLine(cell, row: row)
+            }
+        }
+        return true
     }
 
     /// Nothing left to show on this side: back to the commit panel.
@@ -295,6 +365,49 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     /// The one-line notice shown instead of hunks, if any.
     var noticeText: String? { noticeLabel.isHidden ? nil : noticeLabel.stringValue }
 
+    /// The header's layout toggle title (Unified / Split).
+    var layoutToggleTitle: String { header.layoutText }
+
+    // MARK: - Layout
+
+    /// `v`: switches every open diff between unified and split (persisted
+    /// app-wide through `state`), keeping the current hunk in view.
+    func toggleLayout() {
+        let next = layout.toggled
+        if let state {
+            state.diffLayout = next
+        } else {
+            setLayout(next)
+        }
+    }
+
+    private func setLayout(_ next: DiffLayout) {
+        guard next != layout else { return }
+        layout = next
+        guard isViewLoaded else { return }
+        header.show(layout: next)
+        tableView.reloadData()
+        if currentHunk != nil {
+            scrollToCurrentHunk()
+        } else if tableView.numberOfRows > 0 {
+            tableView.scrollRowToVisible(0)
+        }
+    }
+
+    @objc private func layoutClicked() {
+        toggleLayout()
+    }
+
+    /// The list's rows in the current layout.
+    var rows: [DiffDocument.Row] { document.rows(in: layout) }
+
+    /// List row of the current hunk's header in the current layout.
+    var currentHunkRow: Int? {
+        let hunkRows = document.hunkRows(in: layout)
+        guard let currentHunk, hunkRows.indices.contains(currentHunk) else { return nil }
+        return hunkRows[currentHunk]
+    }
+
     // MARK: - Hunks
 
     /// j/k: the next or previous hunk, scrolled to the top of the list.
@@ -313,14 +426,13 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         guard hunk != currentHunk else { return }
         currentHunk = hunk
         tableView.enumerateAvailableRowViews { rowView, row in
-            (rowView.view(atColumn: 0) as? DiffRowCell)?.isCurrentHunk = document.hunk(ofRow: row) == hunk && hunk != nil
+            (rowView.view(atColumn: 0) as? DiffRowCell)?.isCurrentHunk = document.hunk(ofRow: row, in: layout) == hunk && hunk != nil
         }
         updateHeader()
     }
 
     private func scrollToCurrentHunk() {
-        guard let currentHunk, document.hunkRows.indices.contains(currentHunk) else { return }
-        let row = document.hunkRows[currentHunk]
+        guard let row = currentHunkRow else { return }
         let rect = tableView.rect(ofRow: row)
         let clip = scrollView.contentView
         let maxY = max(0, tableView.bounds.height - clip.bounds.height)
@@ -433,7 +545,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     }
 
     @objc private func rowClicked() {
-        if let hunk = document.hunk(ofRow: tableView.clickedRow) {
+        if let hunk = document.hunk(ofRow: tableView.clickedRow, in: layout) {
             setCurrentHunk(hunk)
         }
     }
@@ -441,14 +553,16 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     // MARK: - Table
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        document.rows.count
+        rows.count
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard document.rows.indices.contains(row) else { return DiffLineCellView.rowHeight }
-        switch document.rows[row] {
+        let rows = rows
+        guard rows.indices.contains(row) else { return DiffLineCellView.rowHeight }
+        switch rows[row] {
         case .hunk: return DiffHunkHeaderCellView.rowHeight
         case .line: return DiffLineCellView.rowHeight
+        case .pair: return DiffSplitLineCellView.rowHeight
         case .notice: return DiffNoticeCellView.rowHeight
         }
     }
@@ -462,18 +576,27 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard document.rows.indices.contains(row), let file = document.file else { return nil }
-        let isCurrent = document.hunk(ofRow: row).map { $0 == currentHunk } ?? false
-        switch document.rows[row] {
+        let rows = rows
+        guard rows.indices.contains(row), let file = document.file else { return nil }
+        switch rows[row] {
         case let .hunk(index):
             let cell = tableView.makeView(withIdentifier: DiffHunkHeaderCellView.identifier, owner: nil) as? DiffHunkHeaderCellView
                 ?? DiffHunkHeaderCellView()
-            cell.configure(hunk: file.hunks[index], actions: hunkActions(for: index), style: style, theme: theme, isCurrentHunk: isCurrent)
+            cell.configure(
+                hunk: file.hunks[index], actions: hunkActions(for: index), style: style, theme: theme,
+                textInset: layout == .unified ? style.gutterWidth : style.sideGutterWidth,
+                isCurrentHunk: index == currentHunk
+            )
             return cell
-        case let .line(hunk, line):
+        case .line:
             let cell = tableView.makeView(withIdentifier: DiffLineCellView.identifier, owner: nil) as? DiffLineCellView
                 ?? DiffLineCellView()
-            cell.configure(line: file.hunks[hunk].lines[line], style: style, isCurrentHunk: isCurrent)
+            configureLine(cell, row: row)
+            return cell
+        case .pair:
+            let cell = tableView.makeView(withIdentifier: DiffSplitLineCellView.identifier, owner: nil) as? DiffSplitLineCellView
+                ?? DiffSplitLineCellView()
+            configureLine(cell, row: row)
             return cell
         case let .notice(text):
             let cell = tableView.makeView(withIdentifier: DiffNoticeCellView.identifier, owner: nil) as? DiffNoticeCellView
@@ -481,6 +604,40 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             cell.configure(text: text, style: style)
             return cell
         }
+    }
+
+    /// Configures a unified or split line cell for `row`: only that row's
+    /// lines and tokens are looked up and turned into attributes.
+    private func configureLine(_ cell: NSView, row: Int) {
+        let rows = rows
+        guard rows.indices.contains(row), let file = document.file else { return }
+        switch rows[row] {
+        case let .line(hunk, index):
+            guard let cell = cell as? DiffLineCellView else { return }
+            let line = file.hunks[hunk].lines[index]
+            let tokens = line.kind == .removed ? oldTokens(of: line) : newTokens(of: line)
+            cell.configure(line: line, tokens: tokens, style: style, isCurrentHunk: hunk == currentHunk)
+        case let .pair(hunk, old, new):
+            guard let cell = cell as? DiffSplitLineCellView else { return }
+            let lines = file.hunks[hunk].lines
+            let oldLine = old.map { lines[$0] }
+            let newLine = new.map { lines[$0] }
+            cell.configure(
+                old: oldLine, oldTokens: oldLine.flatMap(oldTokens(of:)),
+                new: newLine, newTokens: newLine.flatMap(newTokens(of:)),
+                style: style, isCurrentHunk: hunk == currentHunk
+            )
+        case .hunk, .notice:
+            break
+        }
+    }
+
+    private func oldTokens(of line: DiffLine) -> [SyntaxToken]? {
+        line.oldNumber.flatMap { highlights.old[$0] }
+    }
+
+    private func newTokens(of line: DiffLine) -> [SyntaxToken]? {
+        line.newNumber.flatMap { highlights.new[$0] }
     }
 }
 
@@ -498,6 +655,13 @@ enum DiffCommands {
                 scopes: [.diff], defaultKeys: ["escape"], icon: "xmark",
                 isEnabled: { diff($0) != nil },
                 perform: { diff($0)?.close() }
+            ),
+            AppCommand(
+                id: "diff.toggleLayout", title: "Toggle Split Diff", category: .view,
+                scopes: [.diff], defaultKeys: ["v"], icon: "rectangle.split.2x1",
+                // Also before a diff is open, so the layout can be chosen up front.
+                isEnabled: { $0.workspace != nil },
+                perform: { $0.workspace?.diff.toggleLayout() }
             ),
             AppCommand(
                 id: "diff.nextHunk", title: "Next Hunk", category: .navigation,

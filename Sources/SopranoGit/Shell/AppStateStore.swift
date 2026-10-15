@@ -1,8 +1,8 @@
 import Foundation
 
-/// UI state that survives relaunch: recent repositories, open tabs, and
-/// workspace panel sizes. Backed by an injectable `UserDefaults` (the snapshot
-/// harness and tests pass a volatile suite).
+/// UI state that survives relaunch: recent repositories, open tabs,
+/// workspace panel sizes, and the diff layout. Backed by an injectable
+/// `UserDefaults` (the snapshot harness and tests pass a volatile suite).
 @MainActor
 final class AppStateStore {
     static let maxRecentRepositories = 20
@@ -15,9 +15,11 @@ final class AppStateStore {
         static let commitPanelWidth = "workspace.commitPanelWidth"
         static let sidebarVisible = "workspace.sidebarVisible"
         static let commitPanelVisible = "workspace.commitPanelVisible"
+        static let diffLayout = "diff.layout"
     }
 
     let defaults: UserDefaults
+    private let diffLayoutObservers = ObserverList<DiffLayout>()
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -90,5 +92,22 @@ final class AppStateStore {
 
     func setBool(_ value: Bool, forKey key: String) {
         defaults.set(value, forKey: key)
+    }
+
+    // MARK: - Diff layout
+
+    /// Unified or split, for every diff in every tab; unified by default.
+    var diffLayout: DiffLayout {
+        get { defaults.string(forKey: Key.diffLayout).flatMap(DiffLayout.init(rawValue:)) ?? .unified }
+        set {
+            guard newValue != diffLayout else { return }
+            defaults.set(newValue.rawValue, forKey: Key.diffLayout)
+            diffLayoutObservers.notify(newValue)
+        }
+    }
+
+    /// Handlers fire after `diffLayout` changes, until `owner` is deallocated.
+    func addDiffLayoutObserver(_ owner: AnyObject, _ handler: @escaping @MainActor (DiffLayout) -> Void) {
+        diffLayoutObservers.add(owner, handler)
     }
 }
