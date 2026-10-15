@@ -255,6 +255,7 @@ sentence-style names. Test files `import AppKit` (never `Foundation`) plus
 temp directory with an isolated config: `HOME=<tmp>`, `GIT_CONFIG_NOSYSTEM=1`,
 `GIT_CONFIG_GLOBAL=<tmp>/gitconfig` (user, `init.defaultBranch=main`,
 `commit.gpgsign=false`), fixed `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`. Never touch the
-user's repositories or settings.
+user's repositories or settings. Tests that show a dialog run inside
+`DialogTurn.exclusive { … }`: `Dialogs.current` is app-wide and suites run in parallel.
 
 Out of scope for now: see `docs/ROADMAP.md`.

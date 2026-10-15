@@ -85,7 +85,9 @@ not built yet.
   `~/.config/soprano-git/settings.json`.
 - Tests: swift-testing, one `struct …Tests` per file, sentence-style names. Test files
   `import AppKit`, never `Foundation` (the `_Testing_Foundation` overlay breaks the build).
-  Git tests run in temp dirs with an isolated config (`GitTestSupport.swift`).
+  Git tests run in temp dirs with an isolated config (`GitTestSupport.swift`). Dialogs are
+  app-wide and suites run in parallel: any test that shows a dialog runs inside
+  `DialogTurn.exclusive { … }` (`DialogTestSupport.swift`), or tests cross-talk.
 
 ## Gotchas
 
