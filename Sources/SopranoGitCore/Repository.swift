@@ -168,7 +168,15 @@ public struct Repository: Sendable, Hashable {
 
         switch target {
         case let .staged(path):
-            return DiffParser.parse(try await read(["diff", "--cached"] + options + pathspec(path)).stdout)
+            // A staged rename only pairs up when git sees both paths, so look up
+            // the source first (a cheap --raw listing) and diff both.
+            let raw = try await read(["diff", "--cached", "-M", "-z", "--raw"])
+            var paths = [path]
+            if let source = ChangedFileParser.parse(raw.stdout).first(where: { $0.path == path })?.oldPath {
+                paths.insert(source, at: 0)
+            }
+            let files = DiffParser.parse(try await read(["diff", "--cached"] + options + ["--"] + paths.map(GitOutput.literal)).stdout)
+            return files.filter { $0.path == path }
 
         case let .unstaged(path):
             let untracked = try await read(["ls-files", "-z", "--others", "--", GitOutput.literal(path)])

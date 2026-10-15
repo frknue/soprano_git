@@ -299,6 +299,23 @@ struct RepositoryReadTests {
         #expect(one.map(\.path) == ["ws.txt"] && one[0].kind == .added)
     }
 
+    @Test func aStagedRenameDiffsAsARenameOfItsSource() async throws {
+        let sandbox = try GitSandbox()
+        defer { sandbox.remove() }
+        let repository = try await sandbox.makeRepository()
+        let script = GitScript(repository, sandbox: sandbox)
+        let lines = (1...12).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        try await script.commit("Root", ["src/old name.txt": lines])
+        try await script.git("mv", "src/old name.txt", "src/new name.txt")
+
+        let staged = try await repository.diff(.staged(path: "src/new name.txt"))
+
+        #expect(staged.count == 1)
+        #expect(staged.first?.kind == .renamed)
+        #expect(staged.first?.oldPath == "src/old name.txt")
+        #expect(staged.first?.hunks.isEmpty == true)
+    }
+
     @Test func diffOfAMergeCommitIsAgainstItsFirstParent() async throws {
         let sandbox = try GitSandbox()
         defer { sandbox.remove() }
