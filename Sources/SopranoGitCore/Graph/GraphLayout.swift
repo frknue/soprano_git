@@ -93,6 +93,15 @@ public struct GraphLayout: Sendable {
         public var laneCount: Int
         /// Maximum `laneCount` of this and every earlier row.
         public var maxLaneCount: Int
+
+        public init(id: String, kind: GraphNodeKind, lane: Int, edges: [Edge], laneCount: Int, maxLaneCount: Int) {
+            self.id = id
+            self.kind = kind
+            self.lane = lane
+            self.edges = edges
+            self.laneCount = laneCount
+            self.maxLaneCount = maxLaneCount
+        }
     }
 
     /// Why a lane is waiting for its commit. Lower raw value = stronger claim on the node.

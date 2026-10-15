@@ -59,6 +59,7 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
         sidebar.workspace = self
         graph.workspace = self
         commitPanel.workspace = self
+        graph.defaults = state.defaults
         diff.workspace = self
     }
 
