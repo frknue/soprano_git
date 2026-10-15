@@ -10,25 +10,29 @@ import AppKit
 let canvasSize = 1024
 let canvas = CGFloat(canvasSize)
 
-// macOS icon grid: an 824 pt body centred on the 1024 canvas, with the matching corner radius.
-let bodyRect = CGRect(x: 100, y: 100, width: 824, height: 824)
-let bodyRadius: CGFloat = 185
+// Same body as Soprano's app-icon.png so the family sits equally in the Dock: the rounded
+// square fills the whole canvas (corner radius measured from that icon) and carries a 4 px
+// lighter rim.
+let bodyRect = CGRect(x: 0, y: 0, width: canvas, height: canvas)
+let bodyRadius: CGFloat = 228
+let rimWidth: CGFloat = 4
 
 let background = CGColor(srgbRed: 0x2a / 255, green: 0x2a / 255, blue: 0x2a / 255, alpha: 1)
-let edge = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.07)
+let rim = CGColor(srgbRed: 0x36 / 255, green: 0x35 / 255, blue: 0x32 / 255, alpha: 1)
 let cream = CGColor(srgbRed: 0x8a / 255, green: 0x82 / 255, blue: 0x70 / 255, alpha: 1)
 let orange = CGColor(srgbRed: 1, green: 0x7f / 255, blue: 0x1a / 255, alpha: 1)
 
-// Graph geometry, in top-left coordinates on the 1024 canvas.
-let trunkX: CGFloat = 400
-let branchX: CGFloat = 624
-let laneWidth: CGFloat = 40
-let tileSize: CGFloat = 116
-let tileRadius: CGFloat = 30
-let topY: CGFloat = 342
-let middleY: CGFloat = 512
-let bottomY: CGFloat = 682
-let forkRadius: CGFloat = 100
+// Graph geometry, in top-left coordinates on the 1024 canvas. Its tiles span y 296…726, the
+// same band as Soprano's tiles, so both icons carry the same visual weight.
+let trunkX: CGFloat = 395
+let branchX: CGFloat = 629
+let laneWidth: CGFloat = 44
+let tileSize: CGFloat = 124
+let tileRadius: CGFloat = 32
+let topY: CGFloat = 358
+let middleY: CGFloat = 511
+let bottomY: CGFloat = 664
+let forkRadius: CGFloat = 108
 
 guard CommandLine.arguments.count == 2 else {
     FileHandle.standardError.write(Data("Usage: render-app-icon.swift <output.png>\n".utf8))
@@ -63,23 +67,14 @@ func roundedPath(_ rect: CGRect, radius: CGFloat) -> CGPath {
     CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 }
 
-// Body with a soft drop shadow beneath it.
+// Body, then its rim, as on Soprano's icon.
 let bodyPath = roundedPath(bodyRect, radius: bodyRadius)
-context.saveGState()
-// Shadow offsets ignore the flipped CTM, so a negative height drops the shadow downwards.
-context.setShadow(offset: CGSize(width: 0, height: -10), blur: 22, color: CGColor(gray: 0, alpha: 0.32))
 context.addPath(bodyPath)
+context.setFillColor(rim)
+context.fillPath()
+context.addPath(roundedPath(bodyRect.insetBy(dx: rimWidth, dy: rimWidth), radius: bodyRadius - rimWidth))
 context.setFillColor(background)
 context.fillPath()
-context.restoreGState()
-
-// Hairline edge, as on Soprano's icon.
-context.saveGState()
-context.addPath(roundedPath(bodyRect.insetBy(dx: 1.5, dy: 1.5), radius: bodyRadius - 1.5))
-context.setStrokeColor(edge)
-context.setLineWidth(3)
-context.strokePath()
-context.restoreGState()
 
 // Everything else stays inside the body.
 context.addPath(bodyPath)
