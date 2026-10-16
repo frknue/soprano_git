@@ -18,7 +18,7 @@ graph and the everyday commands. The "cool features" follow in `docs/ROADMAP.md`
 - Packaging (`scripts/install.sh`, `scripts/dev.sh`), app icon, offscreen `snapshot`
   harness, fixture repos.
 - Soprano's `⌃A` → `G` opens the active tab's repository here
-  ([frknue/soprano#17](https://github.com/frknue/soprano/pull/17), open).
+  ([frknue/soprano#17](https://github.com/frknue/soprano/pull/17), merged).
 - Diff view: unified or split (`v`), syntax highlighting per language with Soprano's
   vendored highlighter and editor colors, 359 tests.
 
