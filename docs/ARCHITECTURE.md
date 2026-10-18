@@ -174,8 +174,8 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `panel.next` / `panel.previous` | Next / Previous File | detail | `j` / `k` | Commit panel |
 | `panel.openFile` | Open Diff | detail | `enter`, `space` | Commit panel |
 | `diff.openSelected` | Open Diff of Selected File | global | `cmd+d` | Commit panel |
-| `wip.stageFile` / `wip.unstageFile` | Stage / Unstage File | detail | `s` / `u` | Commit panel |
-| `wip.discardFile` | Discard Changes… | detail | `d` | Commit panel |
+| `wip.stageFile` / `wip.unstageFile` | Stage / Unstage Selected Files | detail | `s` / `u` | Commit panel |
+| `wip.discardFile` | Discard Selected Changes… | detail | `d` | Commit panel |
 | `wip.discardAll` | Discard All Unstaged Changes… | detail | `shift+d` | Commit panel |
 | `wip.stageAll` / `wip.unstageAll` | Stage / Unstage All | global | `cmd+shift+s` / `cmd+shift+u` | Commit panel |
 | `wip.commit` | Commit | global | `cmd+enter` | Commit panel |
@@ -226,10 +226,19 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
   Lane colors come from the theme. Ref pills in the first column, display face 11, square,
   tinted with the lane color; HEAD's branch pill is lit.
 - Toolbar keys are `RetroButton`s with their shortcut as a keycap hint.
-- Working-Copy-Panel: „Discard all“ und „Stage all“ bleiben im Unstaged-Abschnitt
-  sichtbar; bei wenig Platz entfallen die Shortcut-Hinweise. „Discard all“ bestätigt
-  die Anzahl der betroffenen Dateien und das Löschen ungetrackter Dateien, verwirft
-  nur die aufgeführten ungestagten Pfade und lässt Index und Konflikte unverändert.
+- Working-Copy-Panel: Ohne Dateiauswahl stehen „Discard all“ und „Stage all“ im
+  Unstaged-Abschnitt. Mit Auswahl zeigen die Abschnitts- und Zeilenaktionen deren
+  Anzahl („Stage N“, „Discard N“, im Staged-Abschnitt „Unstage N“); sie bearbeiten
+  nur die ausgewählten Pfade desselben Abschnitts. Bei wenig Platz entfallen
+  die Shortcut-Hinweise. Discard bestätigt die Anzahl und das Löschen ungetrackter
+  Dateien; nicht ausgewählte Dateien, Index und Konflikte bleiben unverändert.
+- `PanelFileTableView` erweitert `RetroTableView` um Ctrl-/⌘-Klick zum Umschalten
+  einzelner Dateien und ⇧-Klick für Bereiche; Abschnittsüberschriften sind nicht
+  auswählbar. Modifizierte Klicks öffnen keinen Diff; ein einfacher Klick ersetzt
+  die Auswahl und öffnet den Diff. AppKit übernimmt weiterhin die Tastaturauswahl.
+  Der Controller erhält bei Statusaktualisierungen alle überlebenden
+  `(section, path)`-Identitäten; das Öffnen eines bereits ausgewählten Diffs
+  reduziert die Mehrfachauswahl nicht.
 
 ## Verification harness
 
@@ -237,7 +246,7 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
 [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
 [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
-[--focus sidebar|graph|detail|diff]` builds the real main
+[--focus sidebar|graph|detail|diff] [--click-file [ctrl+|cmd+|shift+]<section>:<path>]` builds the real main
 window offscreen (no Dock icon, no visible window, no persisted state), loads the repo
 (welcome screen without `--repo`; `--recent` seeds its list), opens a sample dialog
 (`--dialog`) or runs a failing operation through `controller.run` (`--fail`, error
@@ -248,6 +257,18 @@ dialogs and child panels (rendered through Core Animation, so lamps and fills ar
 exact). Offscreen, dialogs show as child panels at the sheet position, since AppKit
 moves a sheet's parent on screen. Agents verify UI with it and `read` the PNG; they do
 not launch the GUI.
+
+`--click-file` ist wiederholbar: Die Klicks laufen in der angegebenen Reihenfolge
+nach der Ansichts-/Fokuseinstellung und vor `--keys` über den echten Mouse-Down-Pfad
+der Dateiliste, ohne das Fenster zu aktivieren. Abschnitte: `unstaged`, `staged`,
+`conflicts`, `files`; Modifikatoren lassen sich kombinieren, etwa
+`cmd+shift+staged:README.md`. Pfade mit Leerzeichen als ein Shell-Argument übergeben.
+
+```bash
+.build/debug/SopranoGit snapshot --repo /tmp/sg-fx/work --select wip \
+  --click-file 'ctrl+unstaged:docs/guide.md' --click-file 'cmd+unstaged:notes.txt' \
+  --keys s --out /tmp/selected-staged.png
+```
 
 `scripts/make-fixture-repo.sh <dir> [--conflict]` builds a disposable, deterministic repo
 (branches, merges, remote with ahead/behind, tags, stashes, staged/unstaged/untracked

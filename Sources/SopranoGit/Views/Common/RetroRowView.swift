@@ -138,7 +138,7 @@ private final class RowHoverTracker {
 
 /// A table that tracks the hovered row and vends `RetroRowView`s when its
 /// delegate does not supply row views.
-final class RetroTableView: NSTableView {
+class RetroTableView: NSTableView {
     private let tracker = RowHoverTracker()
 
     var hoveredRow: Int { tracker.row }

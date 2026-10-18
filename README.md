@@ -52,10 +52,14 @@ tab selected.
   or `/` searches messages, authors and commit ids.
 - **Commit panel** (`⌘K`): the selected commit's message, author, parents and changed
   files, or for the working copy its conflicted, unstaged and staged files and the commit
-  composer (with Amend). „Discard all“ neben „Stage all“ (`⇧D` im Commit-Panel) verwirft
-  nach Bestätigung ungestagte Änderungen und löscht ungetrackte Dateien; gestagte
-  Änderungen und Konflikte bleiben erhalten. Für einzelne Dateien: „Discard“ beim
-  Darüberfahren oder Auswählen der Zeile, alternativ `d`.
+  composer (with Amend). Ohne Dateiauswahl verwirft „Discard all“ neben „Stage all“
+  (`⇧D` im Commit-Panel) nach Bestätigung alle ungestagten Änderungen und löscht
+  ungetrackte Dateien; gestagte Änderungen und Konflikte bleiben erhalten.
+  Ctrl- oder ⌘-Klick wählt einzelne Dateien an oder ab, ⇧-Klick einen Bereich.
+  Bei einer Auswahl zeigen die Schaltflächen die Anzahl, etwa „Stage 2“ und
+  „Discard 2“; sie bearbeiten nur die ausgewählten Dateien im jeweiligen Abschnitt.
+  `s` / `u` / `d` bearbeitet ebenfalls die Auswahl. Ein einfacher Klick ersetzt
+  die Auswahl und öffnet den Diff.
 - **Diff view**: replaces the graph while a file is open. `j` / `k` move between hunks,
   `s` / `u` / `d` stage, unstage or discard the current hunk, `⇧J` / `⇧K` move to the
   next or previous file, `v` switches between the unified and the split (side-by-side)
@@ -128,7 +132,7 @@ in the focused panel, never while you type in a text field.
 |---|---|
 | `j` / `k`, `Enter` / `Space` | Move through files, open the diff |
 | `⌘D` | Open the diff of the selected file |
-| `s` / `u` / `d` | Stage / unstage / discard the file (or the hunk in the diff) |
+| `s` / `u` / `d` | Stage / unstage / discard selected files (or the current hunk in the diff) |
 | `⌘⇧S` / `⌘⇧U` | Stage all / unstage all |
 | `⇧D` | Discard all unstaged changes (with confirmation; commit panel) |
 | `⌘↩` / `⌘⇧↩` | Commit / stage all and commit |

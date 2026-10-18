@@ -5,7 +5,7 @@ import SopranoGitCore
 /// [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
 /// [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
 /// [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
-/// [--focus sidebar|graph|detail|diff]`
+/// [--focus sidebar|graph|detail|diff] [--click-file [ctrl+|cmd+|shift+]<section>:<path>]`
 ///
 /// Builds the real main window off-screen (no Dock icon, no visible window,
 /// volatile state), loads the repository, replays `--keys` through the
@@ -30,6 +30,8 @@ enum SnapshotCommand {
         var diff: String?
         /// Region focused before `--keys` replay.
         var focus: FocusRegion?
+        /// Mouse clicks replayed in order before `--keys`; modifiers precede the section.
+        var fileClicks: [String] = []
     }
 
     enum OptionError: Error, CustomStringConvertible {
@@ -56,6 +58,7 @@ enum SnapshotCommand {
                                [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
                                [--select wip|stash:<N>|<commit-ish>] [--focus sidebar|graph|detail|diff]
                                [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
+                               [--click-file [ctrl+|cmd+|shift+]<section>:<path>] (repeatable)
     """
 
     nonisolated static func parse(_ arguments: [String]) throws -> Options {
@@ -83,6 +86,7 @@ enum SnapshotCommand {
             case "--fail": options.fail = try value(option)
             case "--select": options.select = try value(option)
             case "--diff": options.diff = try value(option)
+            case "--click-file": options.fileClicks.append(try value(option))
             case "--focus":
                 let text = try value(option)
                 guard let region = FocusRegion(rawValue: text), region != .welcome else { throw OptionError.badFocus(text) }
@@ -258,6 +262,55 @@ enum SnapshotCommand {
             workspace.focus(focus)
             await settle(0.15)
         }
+        for click in options.fileClicks {
+            try clickFile(click, in: workspace)
+            await settle(0.15)
+        }
+    }
+
+    /// Drives AppKit's real mouse-selection path without activating the offscreen window.
+    static func clickFile(_ target: String, in workspace: any RepoWorkspace) throws {
+        guard let colon = target.firstIndex(of: ":") else {
+            throw CaptureError(description: "--click-file needs [modifiers+]<section>:<path>")
+        }
+        var parts = target[..<colon].split(separator: "+").map(String.init)
+        guard let sectionName = parts.popLast() else {
+            throw CaptureError(description: "--click-file is missing its section")
+        }
+        let section: PanelSection
+        switch sectionName {
+        case "unstaged": section = .unstaged
+        case "staged": section = .staged
+        case "conflicts": section = .conflicts
+        case "files": section = .files
+        default: throw CaptureError(description: "--click-file: unknown section \(sectionName)")
+        }
+        var modifiers: NSEvent.ModifierFlags = []
+        for part in parts {
+            switch part {
+            case "ctrl": modifiers.insert(.control)
+            case "cmd": modifiers.insert(.command)
+            case "shift": modifiers.insert(.shift)
+            default: throw CaptureError(description: "--click-file: unknown modifier \(part)")
+            }
+        }
+        let path = String(target[target.index(after: colon)...])
+        let panel = workspace.commitPanel
+        guard let window = workspace.window,
+              let row = panel.rows.firstIndex(where: { $0.file?.section == section && $0.file?.path == path }) else {
+            throw CaptureError(description: "--click-file: no \(sectionName) file \(path)")
+        }
+        let table = panel.tableView
+        table.scrollRowToVisible(row)
+        window.layoutIfNeeded()
+        let rect = table.rect(ofRow: row)
+        let point = table.convert(NSPoint(x: 30, y: rect.midY), to: nil)
+        guard let event = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: point, modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 1, clickCount: 1, pressure: 1
+        ) else { throw CaptureError(description: "--click-file: cannot create mouse event") }
+        table.mouseDown(with: event)
     }
 
     private static func resolveCommit(_ revision: String, in repository: Repository) async throws -> String {

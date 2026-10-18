@@ -25,7 +25,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     private let copyKeycap: KeycapView
     private let copyLabel = NSTextField(labelWithString: "")
     let infoView: CommitInfoView
-    let tableView = RetroTableView()
+    let tableView = PanelFileTableView()
     private var scrollView: NSScrollView!
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
     let composer: CommitComposerView
@@ -63,10 +63,9 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         tableView.addTableColumn(column)
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.allowsMultipleSelection = false
+        tableView.allowsMultipleSelection = true
         tableView.allowsEmptySelection = true
-        tableView.target = self
-        tableView.action = #selector(rowClicked)
+        tableView.onOpenRow = { [weak self] row in self?.openFile(at: row) }
         tableView.setAccessibilityLabel("Changed files")
         RetroListStyle.apply(to: tableView, theme: theme, rowHeight: PanelFileCellView.rowHeight)
         scrollView = RetroListStyle.makeScrollView(documentView: tableView, theme: theme)
@@ -363,17 +362,23 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         return rows.indices.contains(row) ? rows[row].file : nil
     }
 
+    var selectedFiles: [PanelFile] {
+        tableView.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].file : nil }
+    }
+
     var files: [PanelFile] { rows.compactMap(\.file) }
 
     /// Whether any file row is listed (cached; checked on every key press).
     private(set) var hasFiles = false
 
-    /// Replaces the rows, keeping the selected file (by section and path), or
-    /// the same position when it moved away (staging a file selects the next).
+    /// Keeps every surviving selection by section and path; when all selected
+    /// files move away, selects the next file at the old position.
     private func setRows(_ newRows: [PanelRow], resetSelection: Bool = false) {
-        let previousKey = selectedFile?.key
-        let previousRow = tableView.selectedRow
         let changed = newRows != rows
+        let previousKeys: Set<PanelFile.Key> = changed && !resetSelection
+            ? Set(tableView.selectedRowIndexes.lazy.compactMap { self.rows.indices.contains($0) ? self.rows[$0].file?.key : nil })
+            : []
+        let previousRow = tableView.selectedRow
         rows = newRows
         if changed { hasFiles = newRows.contains { $0.file != nil } }
         if changed { tableView.reloadData() }
@@ -388,8 +393,13 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
             return
         }
         guard changed else { return }
-        if let previousKey, let row = rows.firstIndex(where: { $0.file?.key == previousKey }) {
-            select(row: row)
+        var retained = IndexSet()
+        for (index, row) in rows.enumerated() {
+            if let key = row.file?.key, previousKeys.contains(key) { retained.insert(index) }
+        }
+        if !retained.isEmpty {
+            tableView.selectRowIndexes(retained, byExtendingSelection: false)
+            refreshSelectionActions()
         } else if previousRow >= 0 {
             let row = PanelRows.adjacentFileRow(in: rows, from: min(previousRow, rows.count) - 1, delta: 1)
                 ?? PanelRows.adjacentFileRow(in: rows, from: min(previousRow, rows.count), delta: -1)
@@ -426,7 +436,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     }
 
     private func syncSelectionToOpenDiff() {
-        guard let row = openDiffRow(), row != tableView.selectedRow else { return }
+        guard let row = openDiffRow(), !tableView.selectedRowIndexes.contains(row) else { return }
         select(row: row)
     }
 
@@ -467,12 +477,6 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         return true
     }
 
-    @objc private func rowClicked() {
-        let row = tableView.clickedRow
-        guard rows.indices.contains(row), rows[row].file != nil else { return }
-        openFile(at: row)
-    }
-
     // MARK: - Table
 
     func numberOfRows(in tableView: NSTableView) -> Int {
@@ -503,7 +507,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         case let .file(file):
             let cell = tableView.makeView(withIdentifier: PanelFileCellView.identifier, owner: nil) as? PanelFileCellView
                 ?? PanelFileCellView(theme: theme)
-            cell.configure(file: file, actions: actions(for: file), theme: theme, selected: tableView.selectedRow == row)
+            cell.configure(file: file, actions: actions(for: file), theme: theme, selected: tableView.selectedRowIndexes.contains(row))
             return cell
         }
     }
@@ -515,7 +519,11 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     /// Arrow keys step over section rows instead of stopping on them.
     func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
         guard proposed.count == 1, let row = proposed.first, rows.indices.contains(row), rows[row].file == nil else {
-            return proposed
+            var files = IndexSet()
+            for index in proposed where rows.indices.contains(index) && rows[index].file != nil {
+                files.insert(index)
+            }
+            return files
         }
         let current = tableView.selectedRow
         let delta = current >= 0 && row < current ? -1 : 1
@@ -526,16 +534,57 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        let selected = tableView.selectedRow
+        refreshSelectionActions()
+    }
+
+    private func refreshSelectionActions() {
+        let selection = selectedFiles
+        let indexes = tableView.selectedRowIndexes
         tableView.enumerateAvailableRowViews { rowView, row in
-            (rowView.view(atColumn: 0) as? PanelFileCellView)?.isRowSelected = row == selected
+            guard self.rows.indices.contains(row) else { return }
+            switch self.rows[row] {
+            case let .section(section, count):
+                (rowView.view(atColumn: 0) as? PanelSectionCellView)?.configure(
+                    section: section, count: count,
+                    actions: self.sectionActions(section, count: count, selection: selection), theme: self.theme
+                )
+            case let .file(file):
+                (rowView.view(atColumn: 0) as? PanelFileCellView)?.configure(
+                    file: file, actions: self.actions(for: file, selection: selection),
+                    theme: self.theme, selected: indexes.contains(row)
+                )
+            }
         }
     }
 
     // MARK: - Row actions
 
-    private func sectionActions(_ section: PanelSection, count: Int) -> [PanelRowAction] {
+    private func sectionActions(_ section: PanelSection, count: Int, selection: [PanelFile]? = nil) -> [PanelRowAction] {
         guard count > 0 else { return [] }
+        let selection = selection ?? selectedFiles
+        let targets = selection.filter { $0.section == section }
+        if !selection.isEmpty {
+            guard !targets.isEmpty else { return [] }
+            switch section {
+            case .unstaged:
+                return [
+                    PanelRowAction(title: "Discard \(targets.count)", commandID: "wip.discardFile", kind: .danger) { [weak self] in
+                        Task { await self?.discard(targets) }
+                    },
+                    PanelRowAction(title: "Stage \(targets.count)", commandID: "wip.stageFile") { [weak self] in
+                        Task { await self?.stage(targets) }
+                    },
+                ]
+            case .staged:
+                return [
+                    PanelRowAction(title: "Unstage \(targets.count)", commandID: "wip.unstageFile") { [weak self] in
+                        Task { await self?.unstage(targets) }
+                    },
+                ]
+            case .conflicts, .files:
+                break
+            }
+        }
         switch section {
         case .unstaged:
             return [
@@ -557,21 +606,25 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         }
     }
 
-    private func actions(for file: PanelFile) -> [PanelRowAction] {
+    private func actions(for file: PanelFile, selection: [PanelFile]? = nil) -> [PanelRowAction] {
+        let selection = selection ?? selectedFiles
+        let targets = selection.contains { $0.key == file.key }
+            ? selection.filter { $0.section == file.section } : [file]
+        let suffix = targets.count > 1 ? " \(targets.count)" : ""
         switch file.section {
         case .unstaged:
             return [
-                PanelRowAction(title: "Stage", commandID: "wip.stageFile") { [weak self] in
-                    Task { await self?.stage(file) }
+                PanelRowAction(title: "Stage\(suffix)", commandID: "wip.stageFile") { [weak self] in
+                    Task { await self?.stage(targets) }
                 },
-                PanelRowAction(title: "Discard", commandID: "wip.discardFile", kind: .danger) { [weak self] in
-                    Task { await self?.discard(file) }
+                PanelRowAction(title: "Discard\(suffix)", commandID: "wip.discardFile", kind: .danger) { [weak self] in
+                    Task { await self?.discard(targets) }
                 },
             ]
         case .staged:
             return [
-                PanelRowAction(title: "Unstage", commandID: "wip.unstageFile") { [weak self] in
-                    Task { await self?.unstage(file) }
+                PanelRowAction(title: "Unstage\(suffix)", commandID: "wip.unstageFile") { [weak self] in
+                    Task { await self?.unstage(targets) }
                 },
             ]
         case .conflicts:
@@ -582,8 +635,8 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
                 PanelRowAction(title: "Theirs", commandID: "conflict.takeTheirs") { [weak self] in
                     Task { await self?.resolve(file, side: .theirs) }
                 },
-                PanelRowAction(title: "Resolved", commandID: "wip.stageFile") { [weak self] in
-                    Task { await self?.stage(file) }
+                PanelRowAction(title: "Resolved\(suffix)", commandID: "wip.stageFile") { [weak self] in
+                    Task { await self?.stage(targets) }
                 },
             ]
         case .files:
@@ -597,41 +650,59 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         path.split(separator: "/").last.map(String.init) ?? path
     }
 
-    /// Stages a file (marks a conflicted file resolved as it stands).
+    /// Stages the explicit selection (conflicted files are marked resolved).
     @discardableResult
-    func stage(_ file: PanelFile) async -> Bool {
-        let path = file.path
-        let title = file.section == .conflicts ? "Mark \(Self.name(of: path)) resolved" : "Stage \(Self.name(of: path))"
+    func stage(_ files: [PanelFile]) async -> Bool {
+        guard !files.isEmpty else { return false }
+        let paths = files.map(\.path)
+        let title = files.count == 1
+            ? (files[0].section == .conflicts ? "Mark \(Self.name(of: paths[0])) resolved" : "Stage \(Self.name(of: paths[0]))")
+            : "Stage \(files.count) selected files"
         return await controller.run(title, refresh: [.status]) { repository, _ in
-            try await repository.stage(paths: [path])
+            try await repository.stage(paths: paths)
         }
     }
 
     @discardableResult
-    func unstage(_ file: PanelFile) async -> Bool {
-        let path = file.path
-        return await controller.run("Unstage \(Self.name(of: path))", refresh: [.status]) { repository, _ in
-            try await repository.unstage(paths: [path])
+    func unstage(_ files: [PanelFile]) async -> Bool {
+        guard !files.isEmpty else { return false }
+        let paths = files.map(\.path)
+        let title = files.count == 1 ? "Unstage \(Self.name(of: paths[0]))" : "Unstage \(files.count) selected files"
+        return await controller.run(title, refresh: [.status]) { repository, _ in
+            try await repository.unstage(paths: paths)
         }
     }
 
     /// Asks first; untracked files are deleted.
     @discardableResult
-    func discard(_ file: PanelFile) async -> Bool {
-        let path = file.path
-        let message = file.isUntracked
-            ? "\(path) is untracked and will be deleted. This cannot be undone."
-            : "Discard all unstaged changes to \(path)? This cannot be undone."
+    func discard(_ files: [PanelFile]) async -> Bool {
+        let files = files.filter { $0.section == .unstaged }
+        guard let first = files.first else { return false }
+        let paths = files.map(\.path)
+        let untrackedCount = files.reduce(0) { $0 + ($1.isUntracked ? 1 : 0) }
+        let message: String
+        if files.count == 1 {
+            message = first.isUntracked
+                ? "\(first.path) is untracked and will be deleted. This cannot be undone."
+                : "Discard all unstaged changes to \(first.path)? This cannot be undone."
+        } else {
+            let deletion = untrackedCount > 0
+                ? " \(untrackedCount) untracked \(untrackedCount == 1 ? "file will" : "files will") be deleted."
+                : ""
+            message = "Discard unstaged changes in \(files.count) selected files?\(deletion) Unselected files, staged changes and conflicts will be kept. This cannot be undone."
+        }
+        let deletingSingleFile = files.count == 1 && first.isUntracked
         let confirmed = await Dialogs.confirm(
-            title: file.isUntracked ? "Delete Untracked File" : "Discard Changes",
+            title: deletingSingleFile ? "Delete Untracked File" : "Discard Selected Changes",
             message: message,
-            confirmTitle: file.isUntracked ? "Delete" : "Discard",
+            confirmTitle: deletingSingleFile ? "Delete" : "Discard",
             isDestructive: true,
             in: view.window
         )
         guard confirmed else { return false }
-        return await controller.run("Discard \(Self.name(of: path))", refresh: [.status]) { repository, _ in
-            try await repository.discard(paths: [path])
+        let title = files.count == 1 ? "Discard \(Self.name(of: first.path))" : "Discard \(files.count) selected files"
+        return await controller.run(title, refresh: [.status]) { repository, _ in
+            try await repository.discard(paths: paths)
         }
     }
 
@@ -843,6 +914,11 @@ enum CommitPanelCommands {
         return file
     }
 
+    private static func selection(_ context: CommandContext, in sections: Set<PanelSection>) -> [PanelFile] {
+        guard let panel = panel(context), panel.mode == .workingCopy else { return [] }
+        return panel.selectedFiles.filter { sections.contains($0.section) }
+    }
+
     static var all: [AppCommand] {
         [
             AppCommand(
@@ -870,30 +946,33 @@ enum CommitPanelCommands {
                 perform: { panel($0)?.openSelectedFile() }
             ),
             AppCommand(
-                id: "wip.stageFile", title: "Stage File", category: .staging,
+                id: "wip.stageFile", title: "Stage Selected Files", category: .staging,
                 scopes: [.detail], defaultKeys: ["s"], icon: "plus.circle",
-                isEnabled: { selected($0, in: [.unstaged, .conflicts]) != nil },
+                isEnabled: { !selection($0, in: [.unstaged, .conflicts]).isEmpty },
                 perform: { context in
-                    guard let panel = panel(context), let file = selected(context, in: [.unstaged, .conflicts]) else { return }
-                    Task { await panel.stage(file) }
+                    guard let panel = panel(context) else { return }
+                    let files = selection(context, in: [.unstaged, .conflicts])
+                    Task { await panel.stage(files) }
                 }
             ),
             AppCommand(
-                id: "wip.unstageFile", title: "Unstage File", category: .staging,
+                id: "wip.unstageFile", title: "Unstage Selected Files", category: .staging,
                 scopes: [.detail], defaultKeys: ["u"], icon: "minus.circle",
-                isEnabled: { selected($0, in: [.staged]) != nil },
+                isEnabled: { !selection($0, in: [.staged]).isEmpty },
                 perform: { context in
-                    guard let panel = panel(context), let file = selected(context, in: [.staged]) else { return }
-                    Task { await panel.unstage(file) }
+                    guard let panel = panel(context) else { return }
+                    let files = selection(context, in: [.staged])
+                    Task { await panel.unstage(files) }
                 }
             ),
             AppCommand(
-                id: "wip.discardFile", title: "Discard Changes…", category: .staging,
+                id: "wip.discardFile", title: "Discard Selected Changes…", category: .staging,
                 scopes: [.detail], defaultKeys: ["d"], icon: "trash",
-                isEnabled: { selected($0, in: [.unstaged]) != nil },
+                isEnabled: { !selection($0, in: [.unstaged]).isEmpty },
                 perform: { context in
-                    guard let panel = panel(context), let file = selected(context, in: [.unstaged]) else { return }
-                    Task { await panel.discard(file) }
+                    guard let panel = panel(context) else { return }
+                    let files = selection(context, in: [.unstaged])
+                    Task { await panel.discard(files) }
                 }
             ),
             AppCommand(

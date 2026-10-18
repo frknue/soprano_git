@@ -1,6 +1,47 @@
 import AppKit
 import SopranoGitCore
 
+/// File-list mouse selection. Modified clicks only build the selection; an
+/// unmodified click opens its diff. Keyboard selection remains AppKit-owned.
+final class PanelFileTableView: RetroTableView {
+    var onOpenRow: ((Int) -> Void)?
+    private var rangeAnchor: Int?
+
+    override func mouseDown(with event: NSEvent) {
+        let row = row(at: convert(event.locationInWindow, from: nil))
+        guard row >= 0, delegate?.tableView?(self, shouldSelectRow: row) ?? true else { return }
+        window?.makeFirstResponder(self)
+        let toggles = !event.modifierFlags.intersection([.control, .command]).isEmpty
+        if event.modifierFlags.contains(.shift) {
+            let anchor = rangeAnchor ?? (selectedRow >= 0 ? selectedRow : row)
+            var proposed = IndexSet(integersIn: min(anchor, row)...max(anchor, row))
+            if toggles { proposed.formUnion(selectedRowIndexes) }
+            let allowed = delegate?.tableView?(self, selectionIndexesForProposedSelection: proposed) ?? proposed
+            selectRowIndexes(allowed, byExtendingSelection: false)
+        } else if toggles {
+            if selectedRowIndexes.contains(row) {
+                deselectRow(row)
+            } else {
+                selectRowIndexes(IndexSet(integer: row), byExtendingSelection: true)
+            }
+            rangeAnchor = row
+        } else {
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            onOpenRow?(row)
+        }
+    }
+
+    override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {
+        super.selectRowIndexes(indexes, byExtendingSelection: extend)
+        if !extend, indexes.count == 1 { rangeAnchor = indexes.first }
+    }
+
+    override func reloadData() {
+        rangeAnchor = nil
+        super.reloadData()
+    }
+}
+
 /// A button a file row or section heading offers (stage, discard, ours, …).
 struct PanelRowAction {
     var title: String
