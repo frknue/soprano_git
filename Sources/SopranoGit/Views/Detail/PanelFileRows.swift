@@ -165,69 +165,91 @@ final class PanelFileCellView: NSTableCellView {
     }
 }
 
-/// Section heading row: `UNSTAGED (3) ────── [STAGE ALL ⌘⇧S]`.
+/// Section heading with always-visible actions; shortcut hints hide when space is tight.
 final class PanelSectionCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("PanelSectionCell")
     static let rowHeight: CGFloat = 30
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let rule = RetroRuleView(axis: .horizontal, style: .single)
-    private var button: KeyHintButton?
-    private var action: PanelRowAction?
-    private var ruleTrailing: NSLayoutConstraint!
+    private let actionStack = NSStackView()
+    private var buttons: [KeyHintButton] = []
+    private var actions: [PanelRowAction] = []
+    private var fullActionWidth: CGFloat = 0
 
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.setContentHuggingPriority(.required, for: .horizontal)
-        titleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
         addSubview(rule)
-        ruleTrailing = rule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10)
+        actionStack.orientation = .horizontal
+        actionStack.spacing = 4
+        actionStack.translatesAutoresizingMaskIntoConstraints = false
+        actionStack.setHuggingPriority(.required, for: .horizontal)
+        actionStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addSubview(actionStack)
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
             rule.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
             rule.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
             rule.heightAnchor.constraint(equalToConstant: Retro.hairline),
-            ruleTrailing,
+            rule.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
+            rule.trailingAnchor.constraint(equalTo: actionStack.leadingAnchor, constant: -8),
+            actionStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            actionStack.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    var buttonTitle: String? { button?.title }
-
-    func configure(section: PanelSection, count: Int, action: PanelRowAction?, theme: AppTheme) {
+    func configure(section: PanelSection, count: Int, actions: [PanelRowAction], theme: AppTheme) {
         let colors = theme.colors
         let tint = section == .conflicts ? colors.danger : colors.textMuted
         titleLabel.setRetroText("\(section.title) (\(count))", color: tint)
         rule.color = section == .conflicts ? colors.danger.withAlphaComponent(0.5) : colors.borderSubtle
-        button?.removeFromSuperview()
-        button = nil
-        self.action = action
-        ruleTrailing.isActive = false
-        if let action {
-            let key = KeyHintButton(title: action.title, hint: PanelText.keycap(action.commandID), theme: theme, kind: action.kind)
-            key.target = self
-            key.action = #selector(runAction)
-            addSubview(key)
-            ruleTrailing = rule.trailingAnchor.constraint(equalTo: key.leadingAnchor, constant: -8)
-            NSLayoutConstraint.activate([
-                key.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
-                key.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-                ruleTrailing,
-            ])
-            button = key
-        } else {
-            ruleTrailing = rule.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10)
-            ruleTrailing.isActive = true
+        for button in buttons {
+            actionStack.removeArrangedSubview(button)
+            button.removeFromSuperview()
+        }
+        buttons.removeAll(keepingCapacity: true)
+        self.actions = actions
+        fullActionWidth = 0
+        for (index, action) in actions.enumerated() {
+            let button = KeyHintButton(title: action.title, hint: PanelText.keycap(action.commandID), theme: theme, kind: action.kind)
+            button.tag = index
+            button.target = self
+            button.action = #selector(runAction(_:))
+            button.setAccessibilityLabel(action.title)
+            button.toolTip = action.title
+            actionStack.addArrangedSubview(button)
+            if index > 0 { fullActionWidth += actionStack.spacing }
+            fullActionWidth += button.intrinsicContentSize.width
+            buttons.append(button)
+        }
+        updateHints()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updateHints()
+    }
+
+    private func updateHints() {
+        let showHints = fullActionWidth + titleLabel.intrinsicContentSize.width + 36 <= bounds.width
+        for (button, action) in zip(buttons, actions) {
+            let hint = showHints ? PanelText.keycap(action.commandID) : nil
+            if button.hint != hint { button.hint = hint }
         }
     }
 
-    @objc private func runAction() {
-        action?.perform()
+    @objc private func runAction(_ sender: NSButton) {
+        guard actions.indices.contains(sender.tag) else { return }
+        actions[sender.tag].perform()
     }
 }

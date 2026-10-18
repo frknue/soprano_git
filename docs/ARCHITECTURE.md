@@ -176,6 +176,7 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `diff.openSelected` | Open Diff of Selected File | global | `cmd+d` | Commit panel |
 | `wip.stageFile` / `wip.unstageFile` | Stage / Unstage File | detail | `s` / `u` | Commit panel |
 | `wip.discardFile` | Discard Changes… | detail | `d` | Commit panel |
+| `wip.discardAll` | Discard All Unstaged Changes… | detail | `shift+d` | Commit panel |
 | `wip.stageAll` / `wip.unstageAll` | Stage / Unstage All | global | `cmd+shift+s` / `cmd+shift+u` | Commit panel |
 | `wip.commit` | Commit | global | `cmd+enter` | Commit panel |
 | `wip.stageAllAndCommit` | Stage All and Commit | global | `cmd+shift+enter` | Commit panel |
@@ -225,6 +226,10 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
   Lane colors come from the theme. Ref pills in the first column, display face 11, square,
   tinted with the lane color; HEAD's branch pill is lit.
 - Toolbar keys are `RetroButton`s with their shortcut as a keycap hint.
+- Working-Copy-Panel: „Discard all“ und „Stage all“ bleiben im Unstaged-Abschnitt
+  sichtbar; bei wenig Platz entfallen die Shortcut-Hinweise. „Discard all“ bestätigt
+  die Anzahl der betroffenen Dateien und das Löschen ungetrackter Dateien, verwirft
+  nur die aufgeführten ungestagten Pfade und lässt Index und Konflikte unverändert.
 
 ## Verification harness
 

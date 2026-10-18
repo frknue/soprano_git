@@ -498,7 +498,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         case let .section(section, count):
             let cell = tableView.makeView(withIdentifier: PanelSectionCellView.identifier, owner: nil) as? PanelSectionCellView
                 ?? PanelSectionCellView()
-            cell.configure(section: section, count: count, action: sectionAction(section, count: count), theme: theme)
+            cell.configure(section: section, count: count, actions: sectionActions(section, count: count), theme: theme)
             return cell
         case let .file(file):
             let cell = tableView.makeView(withIdentifier: PanelFileCellView.identifier, owner: nil) as? PanelFileCellView
@@ -534,19 +534,26 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
 
     // MARK: - Row actions
 
-    private func sectionAction(_ section: PanelSection, count: Int) -> PanelRowAction? {
-        guard count > 0 else { return nil }
+    private func sectionActions(_ section: PanelSection, count: Int) -> [PanelRowAction] {
+        guard count > 0 else { return [] }
         switch section {
         case .unstaged:
-            return PanelRowAction(title: "Stage all", commandID: "wip.stageAll") { [weak self] in
-                Task { await self?.stageAll() }
-            }
+            return [
+                PanelRowAction(title: "Discard all", commandID: "wip.discardAll", kind: .danger) { [weak self] in
+                    Task { await self?.discardAll() }
+                },
+                PanelRowAction(title: "Stage all", commandID: "wip.stageAll") { [weak self] in
+                    Task { await self?.stageAll() }
+                },
+            ]
         case .staged:
-            return PanelRowAction(title: "Unstage all", commandID: "wip.unstageAll") { [weak self] in
-                Task { await self?.unstageAll() }
-            }
+            return [
+                PanelRowAction(title: "Unstage all", commandID: "wip.unstageAll") { [weak self] in
+                    Task { await self?.unstageAll() }
+                },
+            ]
         case .conflicts, .files:
-            return nil
+            return []
         }
     }
 
@@ -625,6 +632,29 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         guard confirmed else { return false }
         return await controller.run("Discard \(Self.name(of: path))", refresh: [.status]) { repository, _ in
             try await repository.discard(paths: [path])
+        }
+    }
+
+    /// Drops only the listed unstaged paths; the index and conflicts are untouched.
+    @discardableResult
+    func discardAll() async -> Bool {
+        let entries = controller.status.unstaged
+        guard !entries.isEmpty else { return false }
+        let paths = entries.map(\.path)
+        let untrackedCount = entries.reduce(0) { $0 + ($1.unstaged == .untracked ? 1 : 0) }
+        let deletion = untrackedCount > 0
+            ? " \(untrackedCount) untracked \(untrackedCount == 1 ? "file will" : "files will") be deleted."
+            : ""
+        let confirmed = await Dialogs.confirm(
+            title: "Discard All Unstaged Changes",
+            message: "Discard unstaged changes in \(paths.count) \(paths.count == 1 ? "file" : "files")?\(deletion) Staged changes and conflicts will be kept. This cannot be undone.",
+            confirmTitle: "Discard All",
+            isDestructive: true,
+            in: view.window
+        )
+        guard confirmed else { return false }
+        return await controller.run("Discard all unstaged changes", refresh: [.status]) { repository, _ in
+            try await repository.discard(paths: paths)
         }
     }
 
@@ -864,6 +894,17 @@ enum CommitPanelCommands {
                 perform: { context in
                     guard let panel = panel(context), let file = selected(context, in: [.unstaged]) else { return }
                     Task { await panel.discard(file) }
+                }
+            ),
+            AppCommand(
+                id: "wip.discardAll", title: "Discard All Unstaged Changes…", category: .staging,
+                scopes: [.detail], defaultKeys: ["shift+d"], icon: "trash.fill",
+                isEnabled: { context in
+                    panel(context)?.mode == .workingCopy && !(context.controller?.status.unstaged.isEmpty ?? true)
+                },
+                perform: { context in
+                    guard let panel = panel(context) else { return }
+                    Task { await panel.discardAll() }
                 }
             ),
             AppCommand(

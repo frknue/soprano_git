@@ -70,6 +70,93 @@ struct CommitPanelStagingTests {
         }
     }
 
+    @Test func discardingAllKeepsTheIndexAndIgnoredFiles() async throws {
+        try await DialogTurn.exclusive {
+            let harness = try await PanelHarness.make { script in
+                try await script.commit("first", [
+                    ".gitignore": "ignored.txt\n",
+                    "a.txt": "original\n",
+                    "deleted.txt": "restore me\n",
+                ])
+                try script.write("a.txt", "staged\n")
+                try script.write("staged-new.txt", "keep staged addition\n")
+                try await script.git("add", "a.txt", "staged-new.txt")
+                try script.write("a.txt", "unstaged\n")
+                try script.write("new dir/untracked.txt", "delete me\n")
+                try script.write("ignored.txt", "keep ignored\n")
+                try FileManager.default.removeItem(at: script.root.appendingPathComponent("deleted.txt"))
+            }
+            defer { harness.close() }
+            try await harness.showWorkingCopy()
+
+            #expect(try harness.perform("wip.discardAll"))
+            try await harness.confirmDialog()
+            try await harness.waitUntil { harness.controller.status.unstaged.isEmpty }
+
+            #expect(try harness.script.read("a.txt") == "staged\n")
+            #expect(try await harness.script.indexContents("a.txt") == "staged\n")
+            #expect(try harness.script.read("staged-new.txt") == "keep staged addition\n")
+            #expect(try await harness.script.indexContents("staged-new.txt") == "keep staged addition\n")
+            #expect(try harness.script.read("deleted.txt") == "restore me\n")
+            #expect(try harness.script.read("ignored.txt") == "keep ignored\n")
+            #expect(!harness.script.exists("new dir/untracked.txt"))
+            #expect(harness.controller.status.staged.map(\.path).sorted() == ["a.txt", "staged-new.txt"])
+            #expect(try !harness.isEnabled("wip.discardAll"))
+        }
+    }
+
+    @Test func cancellingDiscardAllKeepsTrackedAndUntrackedChanges() async throws {
+        try await DialogTurn.exclusive {
+            let harness = try await PanelHarness.make { script in
+                try await script.commit("first", ["a.txt": "original\n"])
+                try script.write("a.txt", "changed\n")
+                try script.write("new.txt", "untracked\n")
+            }
+            defer { harness.close() }
+            try await harness.showWorkingCopy()
+
+            #expect(try harness.perform("wip.discardAll"))
+            try await harness.waitUntil { Dialogs.current?.isVisible == true }
+            Dialogs.current?.finish(.cancelled)
+            try await harness.waitUntil { Dialogs.current == nil }
+            await harness.controller.refreshNow(.status)
+
+            #expect(try harness.script.read("a.txt") == "changed\n")
+            #expect(try harness.script.read("new.txt") == "untracked\n")
+            #expect(harness.entry("a.txt")?.unstaged == .modified)
+            #expect(harness.entry("new.txt")?.unstaged == .untracked)
+        }
+    }
+
+    @Test func discardingAllLeavesMergeConflictsUnresolved() async throws {
+        try await DialogTurn.exclusive {
+            let harness = try await PanelHarness.make { script in
+                try await script.commit("base", ["c.txt": "base\n", "a.txt": "original\n"])
+                try await script.git("checkout", "-q", "-b", "feature")
+                try await script.commit("theirs", ["c.txt": "theirs\n"])
+                try await script.git("checkout", "-q", "main")
+                try await script.commit("ours", ["c.txt": "ours\n"])
+                try await script.git("merge", "feature", accepting: [1])
+                try script.write("a.txt", "unstaged\n")
+                try script.write("new.txt", "untracked\n")
+            }
+            defer { harness.close() }
+            try await harness.showWorkingCopy()
+            let conflict = try harness.script.read("c.txt")
+            let operation = harness.controller.status.operation
+
+            #expect(try harness.perform("wip.discardAll"))
+            try await harness.confirmDialog()
+            try await harness.waitUntil { harness.controller.status.unstaged.isEmpty }
+
+            #expect(try harness.script.read("a.txt") == "original\n")
+            #expect(!harness.script.exists("new.txt"))
+            #expect(try harness.script.read("c.txt") == conflict)
+            #expect(harness.entry("c.txt")?.conflict == .bothModified)
+            #expect(harness.controller.status.operation == operation)
+        }
+    }
+
     @Test func fileCommandsOnlyApplyToTheirSection() async throws {
         let harness = try await PanelHarness.make { script in
             try await script.commit("first", ["a.txt": "one\n", "b.txt": "one\n"])

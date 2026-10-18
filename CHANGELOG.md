@@ -12,6 +12,7 @@ All notable changes to Soprano Git are documented here. The format follows
 - Graph search over messages, authors and commit ids (`⌘F` or `/`, `n` / `⇧N`).
 - Left panel with local branches (folders by `/`), remotes, tags and stashes, ahead/behind counts, and a filter (`⌘⇧F` or `/`).
 - Commit panel with message, author, parents and changed files, and for the working copy the conflicted, unstaged and staged files with a commit composer and Amend.
+- „Discard all“ im Working-Copy-Panel (`⇧D`): verwirft nach Bestätigung alle ungestagten Änderungen und löscht ungetrackte Dateien; gestagte Änderungen und Konflikte bleiben erhalten.
 - Diff view with hunk staging, unstaging and discarding (`s` / `u` / `d`) and file-to-file navigation (`⇧J` / `⇧K`).
 - Split (side-by-side) diff view, toggled with `v` and remembered for every diff, and syntax highlighting in both diff views.
 - Checkout, branch, rename, delete, merge (fast-forward, merge commit, or fast-forward only), rebase, cherry-pick, revert, reset (soft, mixed, hard), tags, stashes, fetch, pull (`pull.mode`) and push with upstream setup and force-with-lease after a rejected push.
