@@ -338,7 +338,7 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
             graph.takeFocus()
         case .diff:
             if showsDiff { diff.takeFocus() }
-        case .welcome:
+        case .welcome, .settings:
             break
         }
         focusMaybeChanged()
@@ -396,7 +396,7 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
         case .sidebar: sidebar
         case .graph: graph
         case .detail: commitPanel
-        case .diff, .welcome: nil
+        case .diff, .welcome, .settings: nil
         }
     }
 

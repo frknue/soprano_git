@@ -127,6 +127,80 @@ struct SettingsTests {
         #expect(notified)
     }
 
+    @Test func writingAKeyKeepsTheFilesCommentsAndAppliesTheValue() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        try SettingsFile.template.write(to: url, atomically: true, encoding: .utf8)
+        let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
+        center.start(watching: false)
+        var notifications = 0
+        let owner = NSObject()
+        center.addObserver(owner) { notifications += 1 }
+
+        #expect(center.write(500, at: ["graph", "pageSize"]))
+        #expect(center.write("prefix+g", at: ["keybindings", "bindings", "repo.fetch"]))
+
+        let text = try String(contentsOf: url, encoding: .utf8)
+        #expect(text.contains("// Commits loaded per page."))
+        #expect(text.contains(#"// "branch.create": null"#))
+        #expect(center.settings.graphPageSize == 500)
+        #expect(center.keybindingSettings.overrides["repo.fetch"] == .chords(["prefix+g"]))
+        #expect(notifications == 2)
+        let reread = try SettingsResolver.resolve(text: text)
+        #expect(reread.settings.graphPageSize == 500)
+    }
+
+    @Test func removingAKeyRestoresItsDefault() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        try #"{ "git": { "path": "/opt/tools/git" }, "keybindings": { "bindings": { "repo.fetch": null } } }"#
+            .write(to: url, atomically: true, encoding: .utf8)
+        let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
+        center.start(watching: false)
+
+        #expect(center.remove(at: ["git", "path"]))
+        #expect(center.remove(at: ["keybindings", "bindings", "repo.fetch"]))
+
+        #expect(center.settings.gitPath == nil)
+        #expect(center.keybindingSettings.overrides.isEmpty)
+        #expect(center.configuredValue(at: ["git", "path"]) == nil)
+    }
+
+    @Test func aWriteEditsTheFileOnDiskEvenBeforeAHandEditWasReloaded() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        try #"{ "pull": { "mode": "ff" } }"#.write(to: url, atomically: true, encoding: .utf8)
+        let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
+        center.start(watching: false)
+
+        // A hand edit the (debounced) watcher has not delivered yet.
+        try #"{ "pull": { "mode": "rebase" } }"#.write(to: url, atomically: true, encoding: .utf8)
+        #expect(center.write(5, at: ["diff", "contextLines"]))
+
+        #expect(center.settings.pullMode == .rebase)
+        #expect(center.settings.diffContextLines == 5)
+    }
+
+    @Test func aWriteToAFileWithASyntaxErrorLeavesTheFileAloneAndReportsIt() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("settings.json")
+        let broken = #"{ "graph": { "pageSize": 900 "#
+        try broken.write(to: url, atomically: true, encoding: .utf8)
+        let center = SettingsCenter(fileURL: url, registry: CommandRegistry())
+        center.start(watching: false)
+
+        #expect(!center.write("rebase", at: ["pull", "mode"]))
+
+        #expect(try String(contentsOf: url, encoding: .utf8) == broken)
+        #expect(center.settings.pullMode == .fastForwardIfPossible)
+        #expect(center.issues.first?.severity == .error)
+        #expect(center.issues.first?.message.hasPrefix("Could not update") == true)
+    }
+
     @Test func theSopranoThemeSettingResolvesFromSopranosSettingsText() throws {
         #expect(ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: #"{ "theme": "dracula" } // x"#) == "dracula")
         #expect(ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: nil) == "mission-control")

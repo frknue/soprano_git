@@ -104,6 +104,9 @@ struct Keymap {
     private(set) var issues: [ConfigIssue]
     /// Commands whose bindings settings.json changes.
     private(set) var customizedIDs: Set<String>
+    /// Commands with a chord that never fires: shadowed by another command in
+    /// an overlapping scope, or equal to the prefix chord.
+    private(set) var conflictingIDs: Set<String> = []
 
     init(prefixKey: String = "a", prefixTimeoutMs: Int = 1500, chordsByCommand: [String: [KeyChord]] = [:]) {
         self.prefixKey = prefixKey
@@ -176,7 +179,9 @@ struct Keymap {
         }
 
         keymap.chordsByCommand = chords
-        issues.append(contentsOf: conflictIssues(commands: commands, chords: chords, prefixKey: settings.prefixKey))
+        let found = conflicts(commands: commands, chords: chords, prefixKey: settings.prefixKey)
+        issues.append(contentsOf: found.issues)
+        keymap.conflictingIDs = found.ids
         keymap.issues = issues
         return keymap
     }
@@ -184,18 +189,20 @@ struct Keymap {
     /// Two commands on the same chord with overlapping scopes means one never
     /// fires. A region-scoped binding over a global one is intended (region
     /// beats global) and is not a conflict.
-    private static func conflictIssues(
+    private static func conflicts(
         commands: [AppCommand],
         chords: [String: [KeyChord]],
         prefixKey: String
-    ) -> [ConfigIssue] {
+    ) -> (issues: [ConfigIssue], ids: Set<String>) {
         var issues: [ConfigIssue] = []
+        var ids: Set<String> = []
         var seen: [String: [(id: String, scopes: Set<FocusRegion>)]] = [:]
         let prefixChord = KeyChord(mode: .direct, key: prefixKey, ctrl: true)
 
         for command in commands {
             for chord in chords[command.id] ?? [] {
                 if chord.conflictKey == prefixChord.conflictKey {
+                    ids.insert(command.id)
                     issues.append(ConfigIssue(
                         severity: .warning,
                         message: "\"\(command.id)\" is bound to \(chord.displayString), which is the prefix key; it will never fire."
@@ -205,6 +212,7 @@ struct Keymap {
                 let key = chord.conflictKey
                 for owner in seen[key] ?? [] where scopesOverlap(owner.scopes, command.scopes) {
                     let place = command.scopes.isEmpty ? "globally" : "in " + command.scopes.intersection(owner.scopes.isEmpty ? command.scopes : owner.scopes).map(\.rawValue).sorted().joined(separator: ", ")
+                    ids.formUnion([command.id, owner.id])
                     issues.append(ConfigIssue(
                         severity: .warning,
                         message: "\"\(command.id)\" and \"\(owner.id)\" are both bound to \(chord.displayString) \(place); only \"\(owner.id)\" will fire."
@@ -213,7 +221,7 @@ struct Keymap {
                 seen[key, default: []].append((command.id, command.scopes))
             }
         }
-        return issues
+        return (issues, ids)
     }
 
     private static func scopesOverlap(_ lhs: Set<FocusRegion>, _ rhs: Set<FocusRegion>) -> Bool {

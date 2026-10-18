@@ -83,7 +83,7 @@ in the focused panel, never while you type in a text field.
 |---|---|
 | `⌘P` | Command palette |
 | `⌘/`, `?` | Keyboard shortcuts |
-| `⌘,` | Open `settings.json` |
+| `⌘,` | Settings (`j` / `k` switch pages, `/` filters shortcuts, `Esc` closes) |
 | `⌘O` / `⌘⇧O` | Open repository / open a recent one |
 | `⌘T` / `⌘W` | New tab / close tab |
 | `⌃Tab` / `⌃⇧Tab`, `⌘1`–`⌘9` | Next / previous tab, go to tab |
@@ -148,6 +148,12 @@ Settings live in `~/.config/soprano-git/settings.json` (`SOPRANO_GIT_CONFIG` ove
 path). The file is created with comments on first launch, accepts comments and trailing
 commas, and reloads as soon as you save it. A bad value is ignored with a warning; it never
 stops the app from starting.
+
+`⌘,` opens the settings screen as a tab: theme, graph, diff, git executable and extra PATH,
+pull mode, the prefix key, and every shortcut. Record a new chord for a command (press
+`⌃A` first for a prefix chord, `Esc` cancels), turn it off, or reset it. Each change is
+written into `settings.json` right away, keeping its comments; problems in the file are
+listed at the top. "Open settings.json" (palette or app menu) opens the file itself.
 
 ```jsonc
 {

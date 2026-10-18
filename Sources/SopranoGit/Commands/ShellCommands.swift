@@ -18,9 +18,35 @@ enum ShellCommands {
                 perform: { windowController($0)?.showShortcuts() }
             ),
             AppCommand(
-                id: "settings.open", title: "Open settings.json", category: .app,
+                id: "settings.open", title: "Settings", category: .app,
                 defaultKeys: ["cmd+,"], icon: "gearshape",
+                isEnabled: { windowController($0) != nil },
+                perform: { windowController($0)?.showSettings() }
+            ),
+            AppCommand(
+                id: "settings.openFile", title: "Open settings.json", category: .app,
+                icon: "doc.text",
                 perform: { _ in SettingsCenter.shared.openInEditor() }
+            ),
+            AppCommand(
+                id: "settings.nextPage", title: "Next Settings Page", category: .navigation,
+                scopes: [.settings], defaultKeys: ["j"], icon: "arrow.down", inPalette: false,
+                perform: { settings($0)?.movePage(by: 1) }
+            ),
+            AppCommand(
+                id: "settings.previousPage", title: "Previous Settings Page", category: .navigation,
+                scopes: [.settings], defaultKeys: ["k"], icon: "arrow.up", inPalette: false,
+                perform: { settings($0)?.movePage(by: -1) }
+            ),
+            AppCommand(
+                id: "settings.filterShortcuts", title: "Filter Shortcuts", category: .navigation,
+                scopes: [.settings], defaultKeys: ["/"], icon: "magnifyingglass", inPalette: false,
+                perform: { settings($0)?.focusShortcutFilter() }
+            ),
+            AppCommand(
+                id: "settings.close", title: "Close Settings", category: .tabs,
+                scopes: [.settings], defaultKeys: ["escape"], icon: "xmark.square", inPalette: false,
+                perform: { windowController($0)?.closeCurrentTab() }
             ),
             AppCommand(
                 id: "repo.open", title: "Open Repository…", category: .app,
@@ -136,5 +162,9 @@ enum ShellCommands {
 
     static func windowController(_ context: CommandContext) -> MainWindowController? {
         context.window?.windowController as? MainWindowController
+    }
+
+    static func settings(_ context: CommandContext) -> SettingsViewController? {
+        windowController(context)?.currentTab?.settings
     }
 }

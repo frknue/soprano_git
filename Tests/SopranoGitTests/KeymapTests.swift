@@ -66,6 +66,7 @@ struct KeymapTests {
         let keymap = resolve(["repo.fetch": .chords(["cmd+b"])])
         #expect(keymap.issues.count == 1)
         #expect(keymap.issues.first?.message.contains("\"branch.create\" and \"repo.fetch\"") == true)
+        #expect(keymap.conflictingIDs == ["branch.create", "repo.fetch"])
     }
 
     @Test func overlappingScopesConflictButARegionOverAGlobalBindingDoesNot() {
@@ -74,6 +75,7 @@ struct KeymapTests {
         var commands = commands
         commands.append(command("graph.branch", scopes: [.graph], keys: ["b"]))
         #expect(resolve([:], commands: commands).issues.isEmpty)
+        #expect(resolve([:], commands: commands).conflictingIDs.isEmpty)
 
         let conflicting = resolve(["sidebar.next": .chords(["j"])], commands: commands + [
             command("graph.down", scopes: [.graph, .detail], keys: ["j"]),
@@ -95,6 +97,7 @@ struct KeymapTests {
         let keymap = resolve(["repo.fetch": .chords(["ctrl+a"])])
         #expect(keymap.issues.count == 1)
         #expect(keymap.issues.first?.message.contains("prefix key") == true)
+        #expect(keymap.conflictingIDs == ["repo.fetch"])
     }
 
     @Test func settingsCenterMergesRegistryDefaultsWithOverridesForDisplay() throws {

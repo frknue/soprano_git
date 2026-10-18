@@ -252,6 +252,57 @@ final class SettingsCenter {
         observers.add(owner) { _ in handler() }
     }
 
+    /// The value at `path` exactly as settings.json writes it (unexpanded
+    /// paths, unknown keys included); nil when absent or unreadable.
+    func configuredValue(at path: [String]) -> Any? {
+        guard let text = lastText,
+              let data = try? JSONCText.strictJSONData(from: text),
+              var value = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        else { return nil }
+        for key in path {
+            guard let object = value as? [String: Any], let child = object[key] else { return nil }
+            value = child
+        }
+        return value
+    }
+
+    /// Sets one key in settings.json, keeping comments, key order and
+    /// indentation, and applies the result. Missing parent objects are created.
+    /// Returns false when the file could not be edited (the error becomes an issue).
+    @discardableResult
+    func write(_ value: Any, at path: [String]) -> Bool {
+        edit { try JSONCText.setting(value, at: path, in: $0) }
+    }
+
+    /// Removes one key so its built-in default applies again.
+    @discardableResult
+    func remove(at path: [String]) -> Bool {
+        edit { try JSONCText.removing(at: path, in: $0) }
+    }
+
+    private func edit(_ change: (String) throws -> String) -> Bool {
+        do {
+            // Edit what is on disk now, not the last text read: the watcher is
+            // debounced, so a hand edit may not have arrived yet.
+            let existing = try SettingsFile.read(at: fileURL)
+            let current = existing ?? SettingsFile.template
+            let updated = try change(current)
+            if updated != current || existing == nil {
+                try SettingsFile.write(updated, to: fileURL)
+            }
+            lastText = updated
+            apply(text: updated)
+            return true
+        } catch let error as JSONCText.ParseError {
+            fileIssues = [ConfigIssue(severity: .error, message: "Could not update \(displayPath): \(error.message)", line: error.line)]
+        } catch {
+            fileIssues = [ConfigIssue(severity: .error, message: "Could not update \(displayPath): \(error.localizedDescription)")]
+        }
+        logIssues()
+        observers.notify(())
+        return false
+    }
+
     /// Opens settings.json in the user's editor, creating it first if needed.
     func openInEditor() {
         _ = try? SettingsFile.createIfMissing(at: fileURL)
@@ -261,6 +312,12 @@ final class SettingsCenter {
         } else if let textEdit = workspace.urlForApplication(withBundleIdentifier: "com.apple.TextEdit") {
             workspace.open([fileURL], withApplicationAt: textEdit, configuration: NSWorkspace.OpenConfiguration())
         }
+    }
+
+    /// Shows settings.json in Finder, creating it first if needed.
+    func revealInFinder() {
+        _ = try? SettingsFile.createIfMissing(at: fileURL)
+        NSWorkspace.shared.activateFileViewerSelecting([fileURL])
     }
 
     private var loggedIssueIDs: Set<String> = []

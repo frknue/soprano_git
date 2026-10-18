@@ -172,6 +172,29 @@ struct KeyboardRouterTests {
         #expect(log.ran == ["toast.dismiss"])
     }
 
+    @Test func whileCapturingEveryKeyGoesToTheCaptureAndNoCommandRuns() throws {
+        let log = Log()
+        let registry = CommandRegistry()
+        registry.register([command("tab.close", keys: ["cmd+w"], log: log)])
+        let keymap = Keymap.resolve(commands: registry.commands, settings: KeybindingSettings())
+        let router = KeyboardRouter(registry: registry, keymap: { keymap }, context: { self.context(.settings) })
+        func event() throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [.command], timestamp: 0, windowNumber: 0,
+                context: nil, characters: "w", charactersIgnoringModifiers: "w", isARepeat: false, keyCode: 13
+            ))
+        }
+        var captured: [KeyStroke] = []
+
+        router.capture = { captured.append($0) }
+        #expect(router.dispatch(try event()) == nil)
+        router.capture = nil
+        #expect(router.dispatch(try event()) == nil)
+
+        #expect(captured == [KeyStroke(key: "w", meta: true)])
+        #expect(log.ran == ["tab.close"])
+    }
+
     @Test func keyStrokesNormalizeReturnNumpadEnterAndModifiers() throws {
         func event(_ characters: String, keyCode: UInt16, flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
             try #require(NSEvent.keyEvent(

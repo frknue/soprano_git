@@ -9,6 +9,7 @@ enum FocusRegion: String, CaseIterable, Sendable {
     case graph
     case detail
     case diff
+    case settings
 }
 
 /// A view controller that owns a focus area. The workspace calls `takeFocus()`

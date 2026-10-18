@@ -33,6 +33,11 @@ final class KeyboardRouter {
     var onStateChange: ((State) -> Void)?
     /// Called after a command ran through the router (toolbar/menu refresh hooks).
     var onCommandPerformed: ((String) -> Void)?
+    /// While set, every key press goes here instead of to commands, menus or
+    /// the focused view (the settings screen's shortcut recorder).
+    var capture: ((KeyStroke) -> Void)? {
+        didSet { clearPrefix() }
+    }
 
     private weak var window: NSWindow?
     private var monitor: Any?
@@ -86,7 +91,12 @@ final class KeyboardRouter {
     /// Routes one event without the key-window check (the snapshot harness
     /// replays keys into an offscreen window that is never key).
     func dispatch(_ event: NSEvent) -> NSEvent? {
-        guard let stroke = KeyStroke(event: event), let context = context() else { return event }
+        guard let stroke = KeyStroke(event: event) else { return event }
+        if let capture {
+            capture(stroke)
+            return nil
+        }
+        guard let context = context() else { return event }
         return handle(stroke, in: context) == .handled ? nil : event
     }
 

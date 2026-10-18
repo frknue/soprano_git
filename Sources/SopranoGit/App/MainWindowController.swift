@@ -14,12 +14,14 @@ final class MainWindow: NSWindow {
     }
 }
 
-/// One tab of the main window: the welcome screen or a repository workspace.
+/// One tab of the main window: the welcome screen, a repository workspace,
+/// or the settings screen.
 @MainActor
 final class WorkspaceTab {
     enum Content {
         case welcome(WelcomeViewController)
         case repository(RepoWorkspaceViewController)
+        case settings(SettingsViewController)
     }
 
     let id = UUID()
@@ -33,6 +35,7 @@ final class WorkspaceTab {
         switch content {
         case let .welcome(welcome): welcome
         case let .repository(workspace): workspace
+        case let .settings(settings): settings
         }
     }
 
@@ -46,12 +49,28 @@ final class WorkspaceTab {
         return nil
     }
 
+    var settings: SettingsViewController? {
+        if case let .settings(settings) = content { return settings }
+        return nil
+    }
+
     var title: String {
-        workspace?.controller.displayName ?? "Welcome"
+        switch content {
+        case .welcome: "Welcome"
+        case let .repository(workspace): workspace.controller.displayName
+        case .settings: "Settings"
+        }
     }
 
     var root: URL? {
         workspace?.controller.repository.root
+    }
+
+    /// Tab tooltip: the repository or settings file path.
+    var detail: String? {
+        if let root { return SettingsFile.displayPath(for: root) }
+        if settings != nil { return SettingsCenter.shared.displayPath }
+        return nil
     }
 }
 
@@ -217,6 +236,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         selectTab(tabs.count - 1)
     }
 
+    /// Selects the settings tab, opening it after the current tabs when there
+    /// is none, optionally on `page`.
+    func showSettings(page: SettingsPage? = nil) {
+        if let index = tabs.firstIndex(where: { $0.settings != nil }) {
+            selectTab(index)
+        } else {
+            let settings = SettingsViewController(router: router)
+            _ = settings.view
+            tabs.append(WorkspaceTab(content: .settings(settings)))
+            selectTab(tabs.count - 1)
+        }
+        if let page { currentTab?.settings?.show(page) }
+    }
+
     private func makeWelcome() -> WelcomeViewController {
         let welcome = WelcomeViewController(state: state)
         welcome.onOpen = { [weak self] url in
@@ -238,6 +271,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         tab.workspace?.close()
         if tab.viewController.view.superview != nil {
             tab.workspace?.willDetach()
+            tab.settings?.willDetach()
             tab.viewController.view.removeFromSuperview()
         }
         if tabs.isEmpty {
@@ -270,6 +304,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         guard let tab = currentTab, let window else { return }
         for other in tabs where other !== tab && other.viewController.view.superview != nil {
             other.workspace?.willDetach()
+            other.settings?.willDetach()
             other.viewController.view.removeFromSuperview()
         }
         let view = tab.viewController.view
@@ -293,6 +328,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             workspace.setKeyboardMode(keyboardMode)
             workspace.focus(.graph)
             workspace.refreshChrome()
+        case let .settings(settings):
+            settings.takeFocus()
         }
         updateTabBar()
         saveSession()
@@ -300,7 +337,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateTabBar() {
         tabBar.update(
-            items: tabs.map { TabBarView.Item(title: $0.title, detail: $0.root.map { SettingsFile.displayPath(for: $0) }) },
+            items: tabs.map { TabBarView.Item(title: $0.title, detail: $0.detail) },
             selectedIndex: selectedIndex
         )
         window?.title = currentTab.map { "Soprano Git — \($0.title)" } ?? "Soprano Git"
@@ -394,6 +431,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
             if let view = RepoWorkspaceViewController.responderView(firstResponder), view.isDescendant(of: welcome.view) {
                 focus = .welcome
             }
+        case .settings?:
+            focus = .settings
         case nil:
             break
         }

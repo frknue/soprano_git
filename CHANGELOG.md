@@ -21,4 +21,5 @@ All notable changes to Soprano Git are documented here. The format follows
 - GitKraken's shortcuts plus Soprano's `⌃A` prefix and single-key actions in each panel; the command palette (`⌘P`) and the shortcut sheet (`?`).
 - Repository tabs restored on relaunch, a welcome screen with recent repositories, and opening folders with `open -a "Soprano Git"` or a Dock drop.
 - `~/.config/soprano-git/settings.json` with live reload: theme (follows Soprano by default), git path and extra PATH, graph page size and date style, pull mode, diff context, and key bindings.
+- Settings screen (`⌘,`) as its own tab with General, Git, Keyboard and About pages: theme, graph, diff, git executable and extra PATH, pull mode, prefix key and timeout, and every shortcut with Record (press the new chord; `⌃A` first for a prefix chord), Off and Reset. Changes are written to `settings.json` immediately, keeping its comments, and problems in the file are listed at the top. `j` / `k` switch pages, `/` filters shortcuts, `Esc` closes; "Open settings.json" moved to the palette and the app menu.
 - Password and passphrase prompts for git and ssh in the Mission Control style.

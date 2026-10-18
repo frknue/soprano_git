@@ -25,5 +25,4 @@ below come after that, roughly in this order.
 - GitHub pull requests and issues via `gh` (list, create from branch, check out).
 - AI actions via agent CLIs (commit message, explain commit, PR description).
 - ⌥T opens the repo in a Soprano tab; Agent Sessions view fed by Soprano's agent status.
-- Settings screen (settings.json is the only editor for now).
 - ⌥ chords in keybindings (needs Option support in Soprano's `KeyChord`, then a sync).

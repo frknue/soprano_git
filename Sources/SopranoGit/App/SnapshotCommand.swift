@@ -5,7 +5,8 @@ import SopranoGitCore
 /// [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
 /// [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
 /// [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
-/// [--focus sidebar|graph|detail|diff] [--click-file [ctrl+|cmd+|shift+]<section>:<path>]`
+/// [--focus sidebar|graph|detail|diff] [--click-file [ctrl+|cmd+|shift+]<section>:<path>]
+/// [--settings general|git|keyboard|about]`
 ///
 /// Builds the real main window off-screen (no Dock icon, no visible window,
 /// volatile state), loads the repository, replays `--keys` through the
@@ -32,6 +33,8 @@ enum SnapshotCommand {
         var focus: FocusRegion?
         /// Mouse clicks replayed in order before `--keys`; modifiers precede the section.
         var fileClicks: [String] = []
+        /// Settings tab opened on this page before `--keys` replay.
+        var settingsPage: SettingsPage?
     }
 
     enum OptionError: Error, CustomStringConvertible {
@@ -40,6 +43,7 @@ enum SnapshotCommand {
         case badSize(String)
         case missingOut
         case badFocus(String)
+        case badSettingsPage(String)
 
         var description: String {
             switch self {
@@ -48,6 +52,7 @@ enum SnapshotCommand {
             case let .badSize(value): "--size must be WIDTHxHEIGHT, got \(value)"
             case .missingOut: "--out <png> is required"
             case let .badFocus(value): "--focus must be sidebar, graph, detail or diff, got \(value)"
+            case let .badSettingsPage(value): "--settings must be general, git, keyboard or about, got \(value)"
             }
         }
     }
@@ -59,6 +64,7 @@ enum SnapshotCommand {
                                [--select wip|stash:<N>|<commit-ish>] [--focus sidebar|graph|detail|diff]
                                [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
                                [--click-file [ctrl+|cmd+|shift+]<section>:<path>] (repeatable)
+                               [--settings general|git|keyboard|about]
     """
 
     nonisolated static func parse(_ arguments: [String]) throws -> Options {
@@ -87,9 +93,13 @@ enum SnapshotCommand {
             case "--select": options.select = try value(option)
             case "--diff": options.diff = try value(option)
             case "--click-file": options.fileClicks.append(try value(option))
+            case "--settings":
+                let text = try value(option)
+                guard let page = SettingsPage(rawValue: text) else { throw OptionError.badSettingsPage(text) }
+                options.settingsPage = page
             case "--focus":
                 let text = try value(option)
-                guard let region = FocusRegion(rawValue: text), region != .welcome else { throw OptionError.badFocus(text) }
+                guard let region = FocusRegion(rawValue: text), region != .welcome, region != .settings else { throw OptionError.badFocus(text) }
                 options.focus = region
             case "--recent":
                 options.recent = try value(option).split(separator: ",").map { fileURL(String($0)) }
@@ -208,6 +218,10 @@ enum SnapshotCommand {
 
         if let workspace = controller.currentWorkspace {
             try await applyViewState(options, to: workspace)
+        }
+        if let page = options.settingsPage {
+            controller.showSettings(page: page)
+            await settle(0.2)
         }
 
         for token in options.keys {

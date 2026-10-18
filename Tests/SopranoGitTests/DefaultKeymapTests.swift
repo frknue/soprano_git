@@ -25,11 +25,12 @@ struct DefaultKeymapTests {
         }
     }
 
-    @Test func slashFiltersTheSidebarThereAndSearchesTheGraphEverywhereElse() {
+    @Test func slashFiltersTheSidebarAndSettingsThereAndSearchesTheGraphEverywhereElse() {
         let commands = allCommands()
         let slash = commands.filter { $0.defaultKeys.contains("/") }
-        #expect(Set(slash.map(\.id)) == ["graph.search", "sidebar.focusFilter"])
+        #expect(Set(slash.map(\.id)) == ["graph.search", "sidebar.focusFilter", "settings.filterShortcuts"])
         #expect(slash.first { $0.id == "sidebar.focusFilter" }?.scopes == [.sidebar])
+        #expect(slash.first { $0.id == "settings.filterShortcuts" }?.scopes == [.settings])
         #expect(slash.first { $0.id == "graph.search" }?.scopes == [])
     }
 }

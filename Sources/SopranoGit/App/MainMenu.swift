@@ -39,6 +39,7 @@ final class MainMenuController: NSObject, NSMenuItemValidation, NSMenuDelegate {
         appMenu.addItem(withTitle: "About Soprano Git", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(commandItem("settings.open", title: "Settings…"))
+        appMenu.addItem(commandItem("settings.openFile"))
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Soprano Git", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")

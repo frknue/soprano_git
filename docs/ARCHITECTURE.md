@@ -24,7 +24,7 @@ The `ld: warning: building for macOS-14.0 …` link warnings are expected.
 |---|---|---|
 | `Sources/SopranoGitCore/` | Core | `GitRunner` (process), `Repository` (reads + writes), parsers, `PatchBuilder`, `Graph/GraphLayout`. Foundation only, no AppKit. |
 | `Sources/SopranoGit/Vendored/` | — | Copied from Soprano by `scripts/sync-soprano-chrome.sh`. **Never edit.** |
-| `Sources/SopranoGit/App/`, `Shell/`, `Repo/`, `Commands/`, `Views/Common/` | Shell | App delegate, menus, main window, repo tabs, welcome screen, workspace layout, toolbar, status bar, operation banner, `RepositoryController`, settings/theme/keymap, keyboard router, palette, shortcut sheet, dialogs, shared list/row components, snapshot harness, askpass. |
+| `Sources/SopranoGit/App/`, `Shell/`, `Repo/`, `Commands/`, `Views/Common/`, `Views/Welcome/`, `Views/Settings/` | Shell | App delegate, menus, main window, repo tabs, welcome screen, settings screen, workspace layout, toolbar, status bar, operation banner, `RepositoryController`, settings/theme/keymap, keyboard router, palette, shortcut sheet, dialogs, shared list/row components, snapshot harness, askpass. |
 | `Sources/SopranoGit/Views/Graph/` + `Core/Graph/` | Graph | Commit graph table, lane layout and drawing, graph search, `GraphCommands`. |
 | `Sources/SopranoGit/Views/Sidebar/` | Sidebar | Ref tree (local, remote, tags, stashes), filter, `SidebarCommands`. |
 | `Sources/SopranoGit/Views/Detail/`, `Views/Diff/` | Commit panel | Commit/stash details, working-copy staging + commit composer, diff view with hunk staging, `CommitPanelCommands`, `DiffCommands`. |
@@ -94,6 +94,17 @@ menus, toolbar buttons, and the shortcut sheet. Commands act on `context.target`
   `bindings: { "<command id>": "chord" | ["chord", …] | null }`.
 - `ThemeCenter.shared.theme` + `addObserver`; `SettingsCenter.shared.settings`,
   `chords(for:)`, `shortcutText(for:)` + `addObserver`.
+- `SettingsCenter.write(_:at:)` / `remove(at:)` edit one key of the file on disk through
+  `JSONCText` (comments, key order and indentation survive) and apply the result; a file
+  with a syntax error is left alone and the failure becomes an error issue.
+  `configuredValue(at:)` reads a key as written (unexpanded paths).
+- The settings screen (`Views/Settings/SettingsViewController`, `settings.open`) is a tab
+  like the welcome screen, at most one per window, focus region `settings`. Pages: General
+  (theme, graph, diff, file), Git (executable, extra PATH, pull mode), Keyboard (prefix and
+  every command's chords with Record / Off / Reset, filter), About. It keeps no settings of
+  its own: every control writes through `SettingsCenter`, and it re-renders when the file
+  changes. Record sets `KeyboardRouter.capture`; `ShortcutRecorder` turns the presses into
+  one chord (⌃A then a key = `prefix+…`, Esc cancels, ⌥ refused).
 
 ### `Dialogs` (`Shell/Dialogs.swift`) and `GitActions` (`Actions/GitActions.swift`)
 `Dialogs.prompt/confirm/choose` are the only modal UI. `GitActions` are the only place a
@@ -105,7 +116,9 @@ git flow (ask → run → reselect) lives; context menus come from
 The router (Shell) is an `NSEvent` local monitor on keyDown, like Soprano's
 `KeybindingManager`:
 
-1. While a dialog, the palette, or the shortcut sheet is key, the router stays out.
+1. While a dialog, the palette, or the shortcut sheet is key, the router stays out. While
+   the settings screen records a shortcut (`capture` set), every key press goes to the
+   recorder; no command, menu or view sees it.
 2. **Prefix:** ⌃ + `prefixKey` enters prefix mode (status bar chip `PREFIX`) until the
    next key or the timeout. ⌃A ⌃A sends a literal ⌃A to the first responder.
 3. **Scopes:** a command fires when its `scopes` contain the focused region, or its scopes
@@ -127,7 +140,11 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 |---|---|---|---|---|
 | `palette.open` | Command Palette | global | ⌘P `cmd+p` | Shell |
 | `help.shortcuts` | Keyboard Shortcuts | global | `cmd+/`, `?` | Shell |
-| `settings.open` | Open settings.json | global | `cmd+,` | Shell |
+| `settings.open` | Settings | global | `cmd+,` | Shell |
+| `settings.openFile` | Open settings.json | global | — (palette/menu) | Shell |
+| `settings.nextPage` / `settings.previousPage` | Next / Previous Settings Page | settings | `j` / `k` (not in palette) | Shell |
+| `settings.filterShortcuts` | Filter Shortcuts | settings | `/` (not in palette) | Shell |
+| `settings.close` | Close Settings | settings | `escape` (not in palette) | Shell |
 | `repo.open` | Open Repository… | global | `cmd+o` | Shell |
 | `repo.openRecent` | Open Recent Repository… | global | `cmd+shift+o` | Shell |
 | `tab.new` / `tab.close` | New Tab / Close Tab | global | `cmd+t` / `cmd+w` | Shell |
@@ -246,12 +263,13 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
 [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
 [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
-[--focus sidebar|graph|detail|diff] [--click-file [ctrl+|cmd+|shift+]<section>:<path>]` builds the real main
+[--focus sidebar|graph|detail|diff] [--click-file [ctrl+|cmd+|shift+]<section>:<path>]
+[--settings general|git|keyboard|about]` builds the real main
 window offscreen (no Dock icon, no visible window, no persisted state), loads the repo
 (welcome screen without `--repo`; `--recent` seeds its list), opens a sample dialog
 (`--dialog`) or runs a failing operation through `controller.run` (`--fail`, error
 toast), applies `--select` (controller selection), `--diff` (`controller.showDiff`) and
-`--focus` (workspace focus), replays `--keys` through the keyboard router (into the dialog or panel while one
+`--focus` (workspace focus), opens the settings tab on a page (`--settings`), replays `--keys` through the keyboard router (into the dialog or panel while one
 is shown), waits for async work to settle, and writes a PNG of the window including
 dialogs and child panels (rendered through Core Animation, so lamps and fills are
 exact). Offscreen, dialogs show as child panels at the sheet position, since AppKit
