@@ -3,7 +3,9 @@ import SopranoGitCore
 
 /// Center area while `controller.openDiff` is set: the file's hunks with line
 /// numbers and hunk staging, unified or split (`layout`, app-wide), syntax
-/// colored once the whole-file highlight arrives. Owned by the Commit Panel module.
+/// colored once the whole-file highlight arrives. Long lines scroll
+/// horizontally (`textOffset`): only the code text moves, both split sides
+/// together, while gutters and hunk headers stay put. Owned by the Commit Panel module.
 @MainActor
 final class DiffViewController: NSViewController, FocusRegionController, NSTableViewDataSource, NSTableViewDelegate {
     let controller: RepositoryController
@@ -42,10 +44,16 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     /// Bumped by every load; results (documents, highlights) of older loads are dropped.
     private(set) var loadGeneration = 0
     private var style: DiffRowStyle
+    /// How far the code text of every line row is scrolled left, in points;
+    /// within `0...textScroll.limit`. Back to 0 for every newly opened file.
+    private(set) var textOffset: CGFloat = 0
 
     private let header: DiffHeaderView
-    let tableView = RetroTableView()
+    let tableView = DiffTableView()
     private var scrollView: NSScrollView!
+    /// Scroller for `textOffset` along the bottom of the list; hidden when no
+    /// line overflows.
+    let textScroller = DiffTextScroller()
     private let noticeLabel = NSTextField(wrappingLabelWithString: "")
 
     init(controller: RepositoryController) {
@@ -77,6 +85,20 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         RetroListStyle.apply(to: tableView, theme: theme, rowHeight: DiffLineCellView.rowHeight)
         tableView.selectionHighlightStyle = .none
         scrollView = RetroListStyle.makeScrollView(documentView: tableView, theme: theme)
+        tableView.scrollText = { [weak self] delta in
+            guard let self, textScroll.limit > 0 else { return false }
+            setTextOffset(textOffset + delta)
+            return true
+        }
+        scrollView.contentView.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(listResized), name: NSView.frameDidChangeNotification, object: scrollView.contentView
+        )
+        textScroller.scrollerStyle = .legacy
+        textScroller.isEnabled = true
+        textScroller.isHidden = true
+        textScroller.target = self
+        textScroller.action = #selector(textScrolled)
 
         header.closeButton.target = self
         header.closeButton.action = #selector(closeClicked)
@@ -85,7 +107,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         header.show(layout: layout)
 
         noticeLabel.alignment = .center
-        for view in [header, scrollView!, noticeLabel] as [NSView] {
+        for view in [header, scrollView!, textScroller, noticeLabel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -100,6 +122,12 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             noticeLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 24),
             noticeLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -24),
             noticeLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 32),
+            textScroller.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            textScroller.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            textScroller.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            textScroller.heightAnchor.constraint(
+                equalToConstant: NSScroller.scrollerWidth(for: .regular, scrollerStyle: .overlay)
+            ),
         ])
         view = root
         applyTheme()
@@ -129,10 +157,12 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         RetroListStyle.apply(to: tableView, theme: theme, rowHeight: DiffLineCellView.rowHeight)
         tableView.selectionHighlightStyle = .none
         RetroListStyle.applyScrollView(scrollView, theme: theme)
+        textScroller.colors = theme.colors
         rebuildStyle()
         updateHeader()
         updateNotice()
         tableView.reloadData()
+        setTextOffset(textOffset)
     }
 
     private func rebuildStyle() {
@@ -198,6 +228,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             highlights = .none
             isHighlighting = false
             currentHunk = nil
+            textOffset = 0
             loadedDiff = open
             tableView.reloadData()
             updateHeader()
@@ -239,6 +270,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         startHighlighting(open, generation: generation, keepingColors: keepsColors)
         rebuildStyle()
         tableView.reloadData()
+        setTextOffset(textOffset)
         updateHeader()
         updateNotice()
         if isRefresh {
@@ -387,6 +419,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         guard isViewLoaded else { return }
         header.show(layout: next)
         tableView.reloadData()
+        setTextOffset(textOffset)
         if currentHunk != nil {
             scrollToCurrentHunk()
         } else if tableView.numberOfRows > 0 {
@@ -396,6 +429,58 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
 
     @objc private func layoutClicked() {
         toggleLayout()
+    }
+
+    // MARK: - Horizontal scroll
+
+    /// How far the code text can scroll at the list's current width and
+    /// layout (rows span the clip view; the table may lag behind it until drawn).
+    var textScroll: (limit: CGFloat, visible: CGFloat) {
+        style.textScroll(of: document, layout: layout, rowWidth: scrollView.contentView.bounds.width)
+    }
+
+    /// ←/→: scrolls the code text by `columns` characters (negative: left).
+    func scrollText(columns: Int) {
+        setTextOffset(textOffset + CGFloat(columns) * style.columnWidth)
+    }
+
+    /// Characters one ←/→ press scrolls.
+    static let arrowColumns = 8
+
+    /// Moves the code text of every line row to `offset` (clamped to the
+    /// current limit) and syncs the scroller; also re-clamps after a resize,
+    /// a layout switch or a reload.
+    private func setTextOffset(_ offset: CGFloat) {
+        let scroll = textScroll
+        let next = min(max(0, offset), scroll.limit)
+        textScroller.isHidden = scroll.limit <= 0
+        if scroll.limit > 0 {
+            textScroller.knobProportion = scroll.visible / (scroll.visible + scroll.limit)
+            textScroller.doubleValue = next / scroll.limit
+        }
+        guard next != textOffset else { return }
+        textOffset = next
+        tableView.enumerateAvailableRowViews { rowView, _ in
+            (rowView.view(atColumn: 0) as? DiffLineRowCell)?.textOffset = next
+        }
+    }
+
+    @objc private func listResized() {
+        setTextOffset(textOffset)
+    }
+
+    @objc private func textScrolled() {
+        let scroll = textScroll
+        switch textScroller.hitPart {
+        case .knob, .knobSlot:
+            setTextOffset(textScroller.doubleValue * scroll.limit)
+        case .decrementPage, .decrementLine:
+            setTextOffset(textOffset - scroll.visible * 0.9)
+        case .incrementPage, .incrementLine:
+            setTextOffset(textOffset + scroll.visible * 0.9)
+        default:
+            break
+        }
     }
 
     /// The list's rows in the current layout.
@@ -617,6 +702,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             let line = file.hunks[hunk].lines[index]
             let tokens = line.kind == .removed ? oldTokens(of: line) : newTokens(of: line)
             cell.configure(line: line, tokens: tokens, style: style, isCurrentHunk: hunk == currentHunk)
+            cell.textOffset = textOffset
         case let .pair(hunk, old, new):
             guard let cell = cell as? DiffSplitLineCellView else { return }
             let lines = file.hunks[hunk].lines
@@ -627,6 +713,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
                 new: newLine, newTokens: newLine.flatMap(newTokens(of:)),
                 style: style, isCurrentHunk: hunk == currentHunk
             )
+            cell.textOffset = textOffset
         case .hunk, .notice:
             break
         }
@@ -638,6 +725,63 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
 
     private func newTokens(of line: DiffLine) -> [SyntaxToken]? {
         line.newNumber.flatMap { highlights.new[$0] }
+    }
+}
+
+/// The diff list. Horizontal scroll gestures (trackpad, ⇧ + mouse wheel) go
+/// to `scrollText` instead of the list, which never scrolls sideways; a
+/// trackpad gesture and its momentum keep the axis they started on.
+final class DiffTableView: RetroTableView {
+    /// Scrolls the code text by a point delta (positive: further into the
+    /// lines); false when no line overflows, so the event scrolls the list.
+    var scrollText: ((CGFloat) -> Bool)?
+    /// Points one mouse-wheel line moves the text.
+    static let wheelLine: CGFloat = 24
+    private var gestureIsHorizontal: Bool?
+
+    override func scrollWheel(with event: NSEvent) {
+        if !event.phase.isDisjoint(with: [.began, .mayBegin]) {
+            gestureIsHorizontal = nil
+        }
+        let inGesture = !event.phase.isEmpty || !event.momentumPhase.isEmpty
+        let dx = event.scrollingDeltaX
+        let dy = event.scrollingDeltaY
+        let isHorizontal: Bool
+        if inGesture, let locked = gestureIsHorizontal {
+            isHorizontal = locked
+        } else if dx == 0, dy == 0 {
+            super.scrollWheel(with: event)
+            return
+        } else {
+            isHorizontal = abs(dx) > abs(dy)
+            if inGesture { gestureIsHorizontal = isHorizontal }
+        }
+        let delta = -dx * (event.hasPreciseScrollingDeltas ? 1 : Self.wheelLine)
+        if isHorizontal, let scrollText, scrollText(delta) { return }
+        super.scrollWheel(with: event)
+    }
+}
+
+/// The diff's horizontal text scroller: AppKit's tracking (knob drag, clicks
+/// in the slot), drawn as a square `textMuted` bar without a slot.
+final class DiffTextScroller: NSScroller {
+    var colors: ThemeColors? {
+        didSet { needsDisplay = true }
+    }
+
+    /// Wider than tall from the start: that makes the scroller horizontal.
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 100, height: 15))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let colors else { return }
+        let knob = rect(for: .knob)
+        colors.textMuted.withAlphaComponent(0.45).setFill()
+        NSRect(x: knob.minX + 2, y: bounds.midY - 3, width: max(0, knob.width - 4), height: 6).fill(using: .sourceOver)
     }
 }
 
@@ -674,6 +818,18 @@ enum DiffCommands {
                 scopes: [.diff], defaultKeys: ["k"], icon: "arrow.up", inPalette: false,
                 isEnabled: { (diff($0)?.document.hunkCount ?? 0) > 0 },
                 perform: { diff($0)?.moveHunk(by: -1) }
+            ),
+            AppCommand(
+                id: "diff.scrollLeft", title: "Scroll Diff Left", category: .navigation,
+                scopes: [.diff], defaultKeys: ["left"], icon: "arrow.left.to.line", inPalette: false,
+                isEnabled: { diff($0)?.textScroll.limit ?? 0 > 0 },
+                perform: { diff($0)?.scrollText(columns: -DiffViewController.arrowColumns) }
+            ),
+            AppCommand(
+                id: "diff.scrollRight", title: "Scroll Diff Right", category: .navigation,
+                scopes: [.diff], defaultKeys: ["right"], icon: "arrow.right.to.line", inPalette: false,
+                isEnabled: { diff($0)?.textScroll.limit ?? 0 > 0 },
+                perform: { diff($0)?.scrollText(columns: DiffViewController.arrowColumns) }
             ),
             AppCommand(
                 id: "diff.nextFile", title: "Next File", category: .navigation,

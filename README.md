@@ -64,7 +64,8 @@ tab selected.
   `s` / `u` / `d` stage, unstage or discard the current hunk, `⇧J` / `⇧K` move to the
   next or previous file, `v` switches between the unified and the split (side-by-side)
   view for every diff, and `Esc` closes it. Code is syntax highlighted in both views,
-  each side in the language of its own path.
+  each side in the language of its own path. Long lines scroll sideways (trackpad,
+  ⇧ + mouse wheel, the scroll bar, or `←` / `→`) while the line numbers stay put.
 - **Banner**: while a merge, rebase, cherry-pick or revert is paused, it shows the
   conflict count with Continue (`⌃A c`), Abort (`⌃A x`) and Skip.
 - **Status bar**: `NORMAL` / `PREFIX` key mode, the running or last git operation with
@@ -140,6 +141,7 @@ in the focused panel, never while you type in a text field.
 | `a` | Toggle amend |
 | `o` / `t` | Resolve a conflicted file with ours / theirs |
 | `v` | Toggle the split (side-by-side) diff |
+| `←` / `→` | Scroll long diff lines sideways |
 | `Esc` | Close the diff |
 
 ## Settings

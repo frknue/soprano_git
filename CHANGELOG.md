@@ -16,6 +16,7 @@ All notable changes to Soprano Git are documented here. The format follows
 - Dateiauswahl per Ctrl-/⌘-Klick und Bereichsauswahl per ⇧-Klick im Commit-Panel; „Stage N“, „Unstage N“ und „Discard N“ sowie `s` / `u` / `d` bearbeiten nur die ausgewählten Dateien. Die Auswahl bleibt bei Statusaktualisierungen erhalten.
 - Diff view with hunk staging, unstaging and discarding (`s` / `u` / `d`) and file-to-file navigation (`⇧J` / `⇧K`).
 - Split (side-by-side) diff view, toggled with `v` and remembered for every diff, and syntax highlighting in both diff views.
+- Long lines in the diff scroll sideways (trackpad, ⇧ + mouse wheel, the scroll bar at the bottom, or `←` / `→`); line numbers stay in place and both split sides scroll together.
 - Checkout, branch, rename, delete, merge (fast-forward, merge commit, or fast-forward only), rebase, cherry-pick, revert, reset (soft, mixed, hard), tags, stashes, fetch, pull (`pull.mode`) and push with upstream setup and force-with-lease after a rejected push.
 - Banner for a paused merge, rebase, cherry-pick or revert with Continue (`⌃A c`), Abort (`⌃A x`) and Skip; conflicted files resolve with ours (`o`) or theirs (`t`).
 - GitKraken's shortcuts plus Soprano's `⌃A` prefix and single-key actions in each panel; the command palette (`⌘P`) and the shortcut sheet (`?`).

@@ -13,13 +13,15 @@ struct DiffRowStyle {
     let removedMarker: NSAttributedString
     /// Width of one line-number column.
     let numberWidth: CGFloat
+    /// Advance of one character of the (monospaced) code font.
+    let columnWidth: CGFloat
     let markerWidth: CGFloat = 16
     static let rail: CGFloat = 3
     static let padding: CGFloat = 8
     /// Where the text sits vertically inside an 18 pt line row.
     static let textTop: CGFloat = 2
     /// Lines longer than this are cut before drawing (the row truncates them anyway).
-    static let maximumDrawnLength = 2000
+    nonisolated static let maximumDrawnLength = 2000
 
     init(theme: AppTheme, maxLineNumber: Int) {
         colors = theme.colors
@@ -35,13 +37,47 @@ struct DiffRowStyle {
         let digits = max(3, String(max(1, maxLineNumber)).count)
         let digitWidth = NSAttributedString(string: "0", attributes: [.font: small]).size().width
         numberWidth = ceil(CGFloat(digits) * digitWidth) + 12
+        columnWidth = NSAttributedString(string: "0", attributes: [.font: body]).size().width
     }
 
     /// Unified layout: where the two-number gutter ends and the code starts.
     var gutterWidth: CGFloat { Self.rail + numberWidth * 2 }
-    var textX: CGFloat { gutterWidth + markerWidth }
+    var textX: CGFloat { textSpan(from: 0, to: 0, gutter: gutterWidth).minX }
     /// Split layout: each side's one-number gutter.
     var sideGutterWidth: CGFloat { Self.rail + numberWidth }
+
+    /// Where code text goes in a unified row, or a split side, spanning
+    /// `minX..<maxX` with a `gutter`: past the gutter and the +/− marker.
+    func textSpan(from minX: CGFloat, to maxX: CGFloat, gutter: CGFloat) -> (minX: CGFloat, maxX: CGFloat) {
+        (minX + gutter + markerWidth, maxX - 4)
+    }
+
+    /// Horizontal scrolling of the code text in rows `rowWidth` wide: `limit`
+    /// is how far the widest line overflows its text area (plus one spare
+    /// column, so it ends unclipped), `visible` the width of that text area.
+    /// Both split sides scroll together; the side that overflows most sets it.
+    func textScroll(of document: DiffDocument, layout: DiffLayout, rowWidth: CGFloat) -> (limit: CGFloat, visible: CGFloat) {
+        func scroll(columns: Int, span: (minX: CGFloat, maxX: CGFloat)) -> (limit: CGFloat, visible: CGFloat) {
+            let visible = max(0, span.maxX - span.minX)
+            guard columns > 0 else { return (0, visible) }
+            return (max(0, ceil(CGFloat(columns + 1) * columnWidth - visible)), visible)
+        }
+        switch layout {
+        case .unified:
+            return scroll(
+                columns: max(document.oldColumns, document.newColumns),
+                span: textSpan(from: 0, to: rowWidth, gutter: gutterWidth)
+            )
+        case .split:
+            let divider = DiffSplitLineCellView.dividerX(rowWidth: rowWidth)
+            let old = scroll(columns: document.oldColumns, span: textSpan(from: 0, to: divider, gutter: sideGutterWidth))
+            let new = scroll(
+                columns: document.newColumns,
+                span: textSpan(from: divider + 1, to: rowWidth, gutter: sideGutterWidth)
+            )
+            return old.limit >= new.limit ? old : new
+        }
+    }
 
     func number(_ value: Int?) -> NSAttributedString? {
         value.map { NSAttributedString(string: String($0), attributes: numberAttributes) }
@@ -59,7 +95,7 @@ struct DiffRowStyle {
     /// relative to the raw line), tabs shown as four spaces.
     func text(of line: DiffLine, tokens: [SyntaxToken]?) -> NSAttributedString {
         if line.kind == .noNewlineMarker {
-            return NSAttributedString(string: "No newline at end of file", attributes: mutedAttributes)
+            return NSAttributedString(string: DiffDocument.noNewlineText, attributes: mutedAttributes)
         }
         let raw = line.text
         let cut = raw.utf16.count > Self.maximumDrawnLength ? String(raw.prefix(Self.maximumDrawnLength)) : raw
@@ -96,14 +132,22 @@ enum DiffRowDrawing {
         number.draw(at: NSPoint(x: right - 6 - size.width, y: floor((height - size.height) / 2)))
     }
 
-    /// Code text from `x` to `maxX`, cut with a tail ellipsis when it does not fit.
-    static func draw(text: NSAttributedString, x: CGFloat, maxX: CGFloat, height: CGFloat) {
+    /// Code text from `x` to `maxX`, scrolled left by `offset` (clipped at
+    /// `x`) and cut with a tail ellipsis when the rest does not fit.
+    static func draw(text: NSAttributedString, x: CGFloat, maxX: CGFloat, offset: CGFloat, height: CGFloat) {
         let width = maxX - x
         guard width > 4 else { return }
+        if offset > 0 {
+            NSGraphicsContext.saveGraphicsState()
+            NSRect(x: x, y: 0, width: width, height: height).clip()
+        }
         text.draw(
-            with: NSRect(x: x, y: DiffRowStyle.textTop, width: width, height: height - DiffRowStyle.textTop),
+            with: NSRect(x: x - offset, y: DiffRowStyle.textTop, width: width + offset, height: height - DiffRowStyle.textTop),
             options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine]
         )
+        if offset > 0 {
+            NSGraphicsContext.restoreGraphicsState()
+        }
     }
 
     /// The faint raised gutter band ending in a hairline.
@@ -146,10 +190,17 @@ protocol DiffRowCell: NSView {
     var isCurrentHunk: Bool { get set }
 }
 
+/// A unified or split line row. Its code text is scrolled left by
+/// `textOffset` (the diff's horizontal scroll); gutters and markers stay put.
+@MainActor
+protocol DiffLineRowCell: DiffRowCell {
+    var textOffset: CGFloat { get set }
+}
+
 /// One unified diff line: old/new line-number gutters, +/− marker, text;
 /// added and removed lines tinted. Drawn directly for speed; `configure`
 /// builds the row's attributed strings once.
-final class DiffLineCellView: NSView, DiffRowCell {
+final class DiffLineCellView: NSView, DiffLineRowCell {
     static let identifier = NSUserInterfaceItemIdentifier("DiffLineCell")
     static let rowHeight: CGFloat = 18
 
@@ -161,6 +212,9 @@ final class DiffLineCellView: NSView, DiffRowCell {
     private(set) var text = NSAttributedString()
     var isCurrentHunk = false {
         didSet { if oldValue != isCurrentHunk { needsDisplay = true } }
+    }
+    var textOffset: CGFloat = 0 {
+        didSet { if oldValue != textOffset { needsDisplay = true } }
     }
 
     override var isFlipped: Bool { true }
@@ -200,14 +254,15 @@ final class DiffLineCellView: NSView, DiffRowCell {
         DiffRowDrawing.draw(number: oldNumber, right: DiffRowStyle.rail + style.numberWidth, height: height)
         DiffRowDrawing.draw(number: newNumber, right: DiffRowStyle.rail + style.numberWidth * 2, height: height)
         style.marker(for: line.kind)?.draw(at: NSPoint(x: style.gutterWidth + 4, y: DiffRowStyle.textTop))
-        DiffRowDrawing.draw(text: text, x: style.textX, maxX: bounds.width - 4, height: height)
+        let span = style.textSpan(from: 0, to: bounds.width, gutter: style.gutterWidth)
+        DiffRowDrawing.draw(text: text, x: span.minX, maxX: span.maxX, offset: textOffset, height: height)
     }
 }
 
 /// One split diff row: the old line on the left, the new line on the right,
 /// each with its own line-number gutter, +/− marker, text and tint, divided
 /// by a `borderSubtle` hairline. A missing side is a hatched filler.
-final class DiffSplitLineCellView: NSView, DiffRowCell {
+final class DiffSplitLineCellView: NSView, DiffLineRowCell {
     static let identifier = NSUserInterfaceItemIdentifier("DiffSplitLineCell")
     static let rowHeight = DiffLineCellView.rowHeight
 
@@ -223,6 +278,9 @@ final class DiffSplitLineCellView: NSView, DiffRowCell {
     private var style: DiffRowStyle?
     var isCurrentHunk = false {
         didSet { if oldValue != isCurrentHunk { needsDisplay = true } }
+    }
+    var textOffset: CGFloat = 0 {
+        didSet { if oldValue != textOffset { needsDisplay = true } }
     }
 
     override var isFlipped: Bool { true }
@@ -246,7 +304,9 @@ final class DiffSplitLineCellView: NSView, DiffRowCell {
     }
 
     /// Left edge of the right side; the hairline sits just before it.
-    var dividerX: CGFloat { floor(bounds.width / 2) }
+    var dividerX: CGFloat { Self.dividerX(rowWidth: bounds.width) }
+
+    static func dividerX(rowWidth: CGFloat) -> CGFloat { floor(rowWidth / 2) }
 
     override func draw(_ dirtyRect: NSRect) {
         guard let style else { return }
@@ -285,7 +345,8 @@ final class DiffSplitLineCellView: NSView, DiffRowCell {
         DiffRowDrawing.draw(number: side.number, right: minX + gutter, height: height)
         style.marker(for: line.kind)?.draw(at: NSPoint(x: minX + gutter + 4, y: DiffRowStyle.textTop))
         if let text = side.text {
-            DiffRowDrawing.draw(text: text, x: minX + gutter + style.markerWidth, maxX: maxX - 4, height: height)
+            let span = style.textSpan(from: minX, to: maxX, gutter: gutter)
+            DiffRowDrawing.draw(text: text, x: span.minX, maxX: span.maxX, offset: textOffset, height: height)
         }
     }
 }

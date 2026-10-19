@@ -45,6 +45,13 @@ struct DiffDocument: Equatable, Sendable {
     var isTruncated: Bool
     var additions: Int
     var deletions: Int
+    /// Widest listed line of each side in display columns (`columns(of:)`);
+    /// sizes the horizontal scroll of the code text.
+    var oldColumns = 0
+    var newColumns = 0
+
+    /// What a "\ No newline at end of file" line shows.
+    static let noNewlineText = "No newline at end of file"
 
     static let empty = DiffDocument(
         file: nil, rows: [], hunkRows: [], splitRows: [], splitHunkRows: [], notice: nil, totalLines: 0,
@@ -131,7 +138,38 @@ struct DiffDocument: Equatable, Sendable {
         document.rows = rows
         document.hunkRows = hunkRows
         (document.splitRows, document.splitHunkRows) = splitRows(from: rows, file: file)
+        for case let .line(hunk, index) in rows {
+            let line = file.hunks[hunk].lines[index]
+            let width = columns(of: line)
+            switch line.kind {
+            case .removed:
+                document.oldColumns = max(document.oldColumns, width)
+            case .added:
+                document.newColumns = max(document.newColumns, width)
+            case .context, .noNewlineMarker:
+                document.oldColumns = max(document.oldColumns, width)
+                document.newColumns = max(document.newColumns, width)
+            }
+        }
         return document
+    }
+
+    /// Columns a line takes as the row draws it: cut at
+    /// `DiffRowStyle.maximumDrawnLength` characters, tabs as four columns, and
+    /// CJK and emoji (which fall back to wider fonts) as two.
+    static func columns(of line: DiffLine) -> Int {
+        if line.kind == .noNewlineMarker { return noNewlineText.count }
+        var columns = 0
+        for character in line.text.prefix(DiffRowStyle.maximumDrawnLength) {
+            if character == "\t" {
+                columns += 4
+            } else if let scalar = character.unicodeScalars.first, scalar.value >= 0x2E80 {
+                columns += 2
+            } else {
+                columns += 1
+            }
+        }
+        return columns
     }
 
     /// Soprano's side-by-side pairing over the unified rows (so the line cap

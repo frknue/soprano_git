@@ -205,6 +205,7 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `diff.nextFile` / `diff.previousFile` | Next / Previous File | diff | `shift+j` / `shift+k` | Commit panel |
 | `diff.stageHunk` / `diff.unstageHunk` / `diff.discardHunk` | Stage / Unstage / Discard Hunk | diff | `s` / `u` / `d` | Commit panel |
 | `diff.toggleLayout` | Toggle Split Diff (persisted app-wide; enabled whenever a tab is open) | diff | `v` | Commit panel |
+| `diff.scrollLeft` / `diff.scrollRight` | Scroll Diff Left / Right (8 characters; enabled when a line overflows) | diff | `left` / `right` | Commit panel |
 
 ## Layout and visual design
 
@@ -238,6 +239,13 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 - Diff tints: added `success` α0.14, removed `danger` α0.14. Split fillers `textMuted`
   α0.06 with a diagonal `borderSubtle` hatch; a `borderSubtle` hairline divides the sides.
   Syntax colors use Soprano's editor mapping (`SyntaxTokenKind.color(in:)`).
+- Diff horizontal scroll: the list never scrolls sideways; `DiffViewController.textOffset`
+  shifts only the code text of line rows (clipped past the marker), so gutters, markers
+  and hunk headers stay put and both split sides move together. `DiffTableView` routes
+  sideways wheel/trackpad deltas there (a gesture keeps the axis it started on);
+  `DiffTextScroller` is a slotless `textMuted` α0.45 bar along the list's bottom, hidden
+  when no line overflows. The range comes from `DiffDocument.oldColumns` / `newColumns`
+  (widest line per side in monospaced columns) at the clip view's width.
 - Graph: 28 pt rows; lanes 14 pt apart, 2 pt lines; commit nodes are lamps (10 pt, merges
   7 pt hollow), HEAD gets a ring, stashes a small square, the working copy a dashed ring.
   Lane colors come from the theme. Ref pills in the first column, display face 11, square,
