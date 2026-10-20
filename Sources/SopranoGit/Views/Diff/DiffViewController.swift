@@ -795,8 +795,10 @@ enum DiffCommands {
     static var all: [AppCommand] {
         [
             AppCommand(
+                // Also from the commit panel: clicking or j/k through its files
+                // keeps focus there while the diff follows the selection.
                 id: "diff.close", title: "Close Diff", category: .view,
-                scopes: [.diff], defaultKeys: ["escape"], icon: "xmark",
+                scopes: [.diff, .detail], defaultKeys: ["escape"], icon: "xmark",
                 isEnabled: { diff($0) != nil },
                 perform: { diff($0)?.close() }
             ),

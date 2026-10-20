@@ -93,6 +93,20 @@ final class PanelHarness {
         return true
     }
 
+    /// Presses a key through a real router with the default bindings, in the
+    /// region that currently holds the first responder.
+    @discardableResult
+    func press(_ stroke: KeyStroke) -> KeyboardRouter.Disposition {
+        let registry = CommandRegistry()
+        registry.register(CommitPanelCommands.all + DiffCommands.all)
+        let keymap = Keymap.resolve(
+            commands: registry.commands,
+            settings: KeybindingSettings(prefixKey: "a", prefixTimeoutMs: 1500, overrides: [:])
+        )
+        let router = KeyboardRouter(registry: registry, keymap: { keymap }, context: { nil })
+        return router.handle(stroke, in: context(focus: workspace.focusedRegion))
+    }
+
     /// Selects the working copy and waits until its rows show.
     func showWorkingCopy() async throws {
         controller.select(.workingCopy)

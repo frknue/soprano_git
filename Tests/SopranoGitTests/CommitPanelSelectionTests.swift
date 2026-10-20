@@ -45,6 +45,23 @@ struct CommitPanelSelectionTests {
         #expect(harness.controller.openDiff?.target == .unstaged(path: "a.txt"))
     }
 
+    @Test func escapeClosesTheDiffAfterClickingAnotherFileInThePanel() async throws {
+        let harness = try await PanelHarness.make { script in
+            try await script.commit("base", ["a.txt": "base\n", "b.txt": "base\n"])
+            for path in ["a.txt", "b.txt"] { try script.write(path, "changed\n") }
+        }
+        defer { harness.close() }
+        try await harness.showWorkingCopy()
+
+        try SnapshotCommand.clickFile("unstaged:a.txt", in: harness.workspace)
+        try SnapshotCommand.clickFile("unstaged:b.txt", in: harness.workspace)
+        #expect(harness.controller.openDiff?.target == .unstaged(path: "b.txt"))
+        #expect(harness.workspace.focusedRegion == .detail)
+
+        #expect(harness.press(KeyStroke(key: "\u{1B}")) == .handled)
+        #expect(harness.controller.openDiff == nil)
+    }
+
     @Test func shiftClickSelectsARangeAcrossSectionsWithoutSelectingHeadings() async throws {
         let harness = try await PanelHarness.make { script in
             try await script.commit("base", ["a.txt": "base\n", "b.txt": "base\n", "c.txt": "base\n"])

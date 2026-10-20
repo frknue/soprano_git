@@ -200,7 +200,7 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 | `wip.focusMessage` | Focus Commit Message | global | `cmd+shift+m` | Commit panel |
 | `wip.toggleAmend` | Toggle Amend | detail | `a` | Commit panel |
 | `conflict.takeOurs` / `conflict.takeTheirs` | Resolve with Ours / Theirs | detail | `o` / `t` | Commit panel |
-| `diff.close` | Close Diff | diff | `escape` | Commit panel |
+| `diff.close` | Close Diff | diff, detail | `escape` | Commit panel |
 | `diff.nextHunk` / `diff.previousHunk` | Next / Previous Hunk | diff | `j` / `k` | Commit panel |
 | `diff.nextFile` / `diff.previousFile` | Next / Previous File | diff | `shift+j` / `shift+k` | Commit panel |
 | `diff.stageHunk` / `diff.unstageHunk` / `diff.discardHunk` | Stage / Unstage / Discard Hunk | diff | `s` / `u` / `d` | Commit panel |
