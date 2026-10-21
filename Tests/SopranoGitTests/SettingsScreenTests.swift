@@ -86,4 +86,32 @@ struct SettingsScreenTests {
         #expect(controller.router.capture == nil)
         #expect(controller.tabs[1].settings?.recordingCommandID == nil)
     }
+
+    @Test func theThemePopupFollowsSopranoThenListsEveryThemeOption() throws {
+        let (center, directory) = try makeCenter()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (screen, _) = makeScreen(center)
+        screen.show(.general)
+
+        let popup = try #require(screen.themePopup)
+        let values = popup.itemArray.map { $0.representedObject as? String }
+        #expect(values == ["soprano"] + AppTheme.options.map(\.id))
+        #expect(popup.itemArray.first?.title == "Follow Soprano")
+        #expect(popup.itemArray.map(\.title).contains("Folio Paper"))
+        #expect(popup.selectedItem?.representedObject as? String == center.settings.theme)
+    }
+
+    @Test func keyboardRowsShowOneCapGroupPerChordAccentWhenCustomized() throws {
+        let (center, directory) = try makeCenter()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        center.write("prefix+g", at: ["keybindings", "bindings", "repo.fetch"])
+        let (screen, _) = makeScreen(center)
+
+        let fetch = try #require(screen.shortcutRows["repo.fetch"])
+        #expect(fetch.keycapGroups.map(\.caps) == [["⌃A", "G"]])
+        #expect(fetch.keycapGroups.allSatisfy { $0.tone == .accent })
+
+        let other = try #require(screen.shortcutRows.first { $0.key != "repo.fetch" && !$0.value.keycapGroups.isEmpty }?.value)
+        #expect(other.keycapGroups.allSatisfy { $0.tone == .primary })
+    }
 }

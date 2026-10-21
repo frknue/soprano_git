@@ -165,19 +165,53 @@ struct DiffHighlightTests {
         #expect(kinds(harness.diff.highlights.new[18]) == [.keyword, .string])
     }
 
-    @Test func tokenKindsUseSopranosEditorColors() {
-        let colors = ThemeCenter.shared.theme.colors
-        #expect(SyntaxTokenKind.keyword.color(in: colors) == colors.accentStrong)
-        #expect(SyntaxTokenKind.tag.color(in: colors) == colors.accentStrong)
-        #expect(SyntaxTokenKind.string.color(in: colors) == colors.success)
-        #expect(SyntaxTokenKind.inserted.color(in: colors) == colors.success)
-        #expect(SyntaxTokenKind.comment.color(in: colors) == colors.textMuted)
-        #expect(SyntaxTokenKind.number.color(in: colors) == colors.accent)
-        #expect(SyntaxTokenKind.attribute.color(in: colors) == colors.accent)
-        #expect(SyntaxTokenKind.heading.color(in: colors) == colors.accent)
-        #expect(SyntaxTokenKind.type.color(in: colors) == colors.cyan)
-        #expect(SyntaxTokenKind.function.color(in: colors) == colors.blue)
-        #expect(SyntaxTokenKind.key.color(in: colors) == colors.blue)
-        #expect(SyntaxTokenKind.deleted.color(in: colors) == colors.danger)
+    @Test func tokenKindsUseFoliosSyntaxColorsAndNeverTheAccent() {
+        for theme in [AppTheme.folioPaper, AppTheme.folioInk] {
+            let colors = theme.colors
+            #expect(SyntaxTokenKind.keyword.color(in: colors) == colors.textPrimary)
+            #expect(SyntaxTokenKind.heading.color(in: colors) == colors.textPrimary)
+            #expect(SyntaxTokenKind.type.color(in: colors) == colors.cyan)
+            #expect(SyntaxTokenKind.tag.color(in: colors) == colors.textPrimary)
+            #expect(SyntaxTokenKind.string.color(in: colors) == colors.success)
+            #expect(SyntaxTokenKind.inserted.color(in: colors) == colors.success)
+            #expect(SyntaxTokenKind.comment.color(in: colors) == colors.textMuted)
+            #expect(SyntaxTokenKind.number.color(in: colors) == colors.yellow)
+            #expect(SyntaxTokenKind.attribute.color(in: colors) == colors.yellow)
+            #expect(SyntaxTokenKind.function.color(in: colors) == colors.blue)
+            #expect(SyntaxTokenKind.key.color(in: colors) == colors.blue)
+            #expect(SyntaxTokenKind.deleted.color(in: colors) == colors.danger)
+            let kinds: [SyntaxTokenKind] = [
+                .keyword, .string, .comment, .number, .type, .function, .attribute, .key, .tag, .heading, .inserted, .deleted,
+            ]
+            for kind in kinds {
+                #expect(kind.color(in: colors) != colors.accent)
+                #expect(kind.color(in: colors) != colors.accentStrong)
+            }
+        }
+    }
+
+    @Test func keywordsDrawSemiboldAndCommentsItalic() throws {
+        let style = DiffRowStyle(theme: .folioPaper, maxLineNumber: 9)
+        let line = DiffLine(kind: .context, text: "let x = 1 // one", oldNumber: 1, newNumber: 1)
+        let tokens = [
+            SyntaxToken(range: NSRange(location: 0, length: 3), kind: .keyword),
+            SyntaxToken(range: NSRange(location: 8, length: 1), kind: .number),
+            SyntaxToken(range: NSRange(location: 10, length: 6), kind: .comment),
+        ]
+        let text = style.text(of: line, tokens: tokens, emphasis: nil)
+        func font(at index: Int) -> NSFont? { text.attribute(.font, at: index, effectiveRange: nil) as? NSFont }
+        func color(at index: Int) -> NSColor? { text.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor }
+
+        #expect(font(at: 0) === style.semiboldFont)
+        #expect(color(at: 0) == style.colors.textPrimary)
+        #expect(font(at: 12) === style.italicFont)
+        #expect(style.italicFont.fontDescriptor.symbolicTraits.contains(.italic))
+        #expect(color(at: 12) == style.colors.textMuted)
+        // Plain code and other tokens keep the regular SF Mono 12.
+        let regular = try #require(font(at: 4))
+        #expect(regular !== style.semiboldFont && regular !== style.italicFont)
+        #expect(regular.pointSize == 12)
+        #expect(font(at: 8) === regular)
+        #expect(color(at: 8) == style.colors.yellow)
     }
 }

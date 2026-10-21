@@ -35,12 +35,12 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         /// Starting width; the graph follows its lanes and the message takes the rest.
         var defaultWidth: CGFloat {
             switch self {
-            case .refs: 170
+            case .refs: 184
             case .graph: 76
             case .message: 300
-            case .author: 130
-            case .date: 100
-            case .id: 72
+            case .author: 96
+            case .date: 52
+            case .id: 78
             }
         }
 
@@ -86,13 +86,15 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     private var theme: AppTheme
     private(set) var style: GraphStyle
 
-    let tableView = RetroTableView()
+    let tableView = ListTableView()
     private let headerView = GraphHeaderView()
     private var scrollView: NSScrollView!
     private var columns: [Column: NSTableColumn] = [:]
     private var customWidths: [String: Double] = [:]
     private var isApplyingWidths = false
     private let rowMenu = NSMenu()
+    /// The row last drawn with selected-row text (ink meta, accent matches).
+    private var styledSelectedRow = -1
 
     let searchBar: GraphSearchBar
     private var searchBarHeight: NSLayoutConstraint!
@@ -170,7 +172,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         headerView.frame = NSRect(x: 0, y: 0, width: 600, height: GraphMetrics.headerHeight)
         styleTable()
 
-        scrollView = RetroListStyle.makeScrollView(documentView: tableView, theme: theme)
+        scrollView = ListStyle.makeScrollView(documentView: tableView, theme: theme, surface: .base)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
@@ -199,7 +201,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
-        root.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        root.layer?.backgroundColor = theme.colors.bgBase.cgColor
 
         controller.addObserver(self) { [weak self] event in
             self?.handle(event)
@@ -225,7 +227,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     }
 
     private func styleTable() {
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: GraphMetrics.rowHeight)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: GraphMetrics.rowHeight, surface: .base)
         tableView.headerView = headerView
         tableView.cornerView = nil
         tableView.columnAutoresizingStyle = .noColumnAutoresizing
@@ -264,9 +266,9 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         self.theme = theme
         style = GraphStyle(theme: theme)
         guard isViewLoaded else { return }
-        view.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        view.layer?.backgroundColor = theme.colors.bgBase.cgColor
         styleTable()
-        RetroListStyle.applyScrollView(scrollView, theme: theme)
+        ListStyle.applyScrollView(scrollView, theme: theme, surface: .base)
         searchBar.apply(theme: theme)
         headerView.needsDisplay = true
         reloadVisibleRows()
@@ -542,10 +544,12 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         case .graph:
             let view = reusable(GraphLaneView.identifier) { GraphLaneView() }
             view.configure(
-                row: entry.layout, index: row, isHead: isHead(entry), hasRefs: !pills(for: entry).isEmpty, style: style
+                row: entry.layout, index: row, isHead: isHead(entry), hasRefs: !pills(for: entry).isEmpty,
+                workingCopyLane: workingCopyLane(at: row), style: style
             )
             return view
         case .message:
+            let isSelected = tableView.isRowSelected(row)
             let view = reusable(GraphTextView.messageIdentifier) { GraphTextView() }
             switch entry.node.content {
             case .workingCopy:
@@ -555,6 +559,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
                     text: commit.summary,
                     attributes: commit.isMerge ? style.mergeMessageAttributes : style.messageAttributes,
                     highlight: highlightRange(in: commit.summary, row: row),
+                    isSelected: isSelected,
                     style: style
                 )
             case let .stash(stash):
@@ -562,21 +567,24 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
                     text: stash.message,
                     attributes: style.mergeMessageAttributes,
                     highlight: highlightRange(in: stash.message, row: row),
+                    isSelected: isSelected,
                     style: style
                 )
             }
             return view
         case .author:
             let view = reusable(GraphTextView.authorIdentifier) { GraphTextView() }
+            let attributes = tableView.isRowSelected(row) ? style.selectedMetaAttributes : style.metaAttributes
             if case let .commit(commit) = entry.node.content {
-                view.configure(text: commit.author.name, attributes: style.mutedAttributes, style: style)
+                view.configure(text: commit.author.name, attributes: attributes, style: style)
             } else {
-                view.configure(text: "", attributes: style.mutedAttributes, style: style)
+                view.configure(text: "", attributes: attributes, style: style)
             }
             return view
         case .date:
             let view = reusable(GraphTextView.dateIdentifier) { GraphTextView() }
-            view.configure(text: dateText(row: row, entry: entry), attributes: style.mutedAttributes, style: style)
+            let attributes = tableView.isRowSelected(row) ? style.selectedMetaAttributes : style.metaAttributes
+            view.configure(text: dateText(row: row, entry: entry), attributes: attributes, style: style)
             return view
         case .id:
             let view = reusable(GraphTextView.idIdentifier) { GraphTextView() }
@@ -585,7 +593,8 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             case let .commit(commit): commit.shortID
             case let .stash(stash): String(stash.id.prefix(7))
             }
-            view.configure(text: text, attributes: style.mutedAttributes, style: style)
+            let attributes = tableView.isRowSelected(row) ? style.selectedShaAttributes : style.shaAttributes
+            view.configure(text: text, attributes: attributes, style: style)
             return view
         }
     }
@@ -604,6 +613,13 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     private func pills(for entry: GraphEntry) -> [RefPill] {
         guard case let .commit(commit) = entry.node.content else { return Self.noPills }
         return pillsByCommit[commit.id] ?? Self.noPills
+    }
+
+    /// The working copy's lane while its dashed edge runs down to HEAD (rows 0 ... HEAD).
+    private func workingCopyLane(at row: Int) -> Int? {
+        guard let first = model.entries.first, case .workingCopy = first.node.content else { return nil }
+        if let head = headRow, row > head { return nil }
+        return first.layout.lane
     }
 
     private func isHead(_ entry: GraphEntry) -> Bool {
@@ -632,6 +648,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     // MARK: - Selection
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        restyleSelectedRows()
         guard !isApplyingSelection else { return }
         let row = tableView.selectedRow
         guard let selection = model.selection(at: row) else {
@@ -640,6 +657,17 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             return
         }
         controller.select(selection)
+    }
+
+    /// Redraws the rows entering and leaving the selection: the selected row's
+    /// author, date and SHA are ink and its search match is drawn in `matchOnSelection`.
+    private func restyleSelectedRows() {
+        let selected = tableView.selectedRow
+        guard selected != styledSelectedRow else { return }
+        let rows = IndexSet([styledSelectedRow, selected].filter { $0 >= 0 && $0 < model.count })
+        styledSelectedRow = selected
+        guard !rows.isEmpty else { return }
+        tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integersIn: 0 ..< tableView.numberOfColumns))
     }
 
     private func setTableSelection(_ row: Int?) {

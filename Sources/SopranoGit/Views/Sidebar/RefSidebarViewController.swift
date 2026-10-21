@@ -1,13 +1,17 @@
 import AppKit
 import SopranoGitCore
 
-/// Left panel: local branches, remotes, tags and stashes, with a filter. Owned by the
+/// Left panel: local branches, remotes, tags and stashes, with a filter (a
+/// `SearchField` in an 8 10 6 strip). Owned by the
 /// Sidebar module (Wave B).
 @MainActor
 final class RefSidebarViewController: NSViewController, FocusRegionController, SelectionTargetProvider,
     NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate, NSMenuDelegate
 {
-    static let rowHeight: CGFloat = 24
+    static let rowHeight: CGFloat = SidebarCellView.contentHeight
+    /// Section rows carry their top margin: 8 pt, 2 pt for the first.
+    static let sectionMargin: CGFloat = 8
+    static let firstSectionMargin: CGFloat = 2
 
     let controller: RepositoryController
     /// Set by the workspace right after creating the controller.
@@ -32,9 +36,9 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
     private var isRestoring = false
 
     private let header: PanelHeaderView
-    private let searchField: RetroSearchField
+    private let searchField: SearchField
     private let searchStrip = NSView()
-    let outlineView = RetroOutlineView()
+    let outlineView = ListOutlineView()
     private var scrollView: NSScrollView!
 
     init(controller: RepositoryController) {
@@ -42,7 +46,7 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
         self.theme = ThemeCenter.shared.theme
         self.expansion = SidebarExpansionStore(defaults: .standard, repositoryRoot: controller.repository.root)
         header = PanelHeaderView(title: "Refs", theme: ThemeCenter.shared.theme)
-        searchField = RetroSearchField(placeholder: "Filter", theme: ThemeCenter.shared.theme, hint: "/")
+        searchField = SearchField(placeholder: "Filter", theme: ThemeCenter.shared.theme, hint: "/")
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -59,7 +63,8 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
         column.resizingMask = .autoresizingMask
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
-        outlineView.indentationPerLevel = 12
+        // Cells indent themselves and draw their own chevrons.
+        outlineView.indentationPerLevel = 0
         outlineView.indentationMarkerFollowsCell = true
         outlineView.autoresizesOutlineColumn = false
         outlineView.floatsGroupRows = false
@@ -71,8 +76,8 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
         let menu = NSMenu()
         menu.delegate = self
         outlineView.menu = menu
-        RetroListStyle.apply(to: outlineView, theme: theme, rowHeight: Self.rowHeight)
-        scrollView = RetroListStyle.makeScrollView(documentView: outlineView, theme: theme)
+        ListStyle.apply(to: outlineView, theme: theme, rowHeight: Self.rowHeight)
+        scrollView = ListStyle.makeScrollView(documentView: outlineView, theme: theme)
 
         searchField.field.delegate = self
         searchStrip.wantsLayer = true
@@ -130,8 +135,8 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
         searchStrip.layer?.backgroundColor = colors.bgPanel.cgColor
         header.apply(theme: theme)
         searchField.apply(theme: theme)
-        RetroListStyle.apply(to: outlineView, theme: theme, rowHeight: Self.rowHeight)
-        RetroListStyle.applyScrollView(scrollView, theme: theme)
+        ListStyle.apply(to: outlineView, theme: theme, rowHeight: Self.rowHeight)
+        ListStyle.applyScrollView(scrollView, theme: theme)
         reloadPreservingState()
     }
 
@@ -261,7 +266,13 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
 
     /// Expands or collapses the selected group (`sidebar.toggle`).
     func toggleSelected() {
-        guard let node = selectedNode, node.isGroup else { return }
+        guard let node = selectedNode else { return }
+        toggle(node)
+    }
+
+    /// Expands or collapses `node` (chevron click, `sidebar.toggle`).
+    func toggle(_ node: SidebarNode) {
+        guard node.isGroup else { return }
         if outlineView.isItemExpanded(node) {
             outlineView.collapseItem(node)
         } else {
@@ -330,15 +341,34 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
     // MARK: - NSOutlineViewDelegate
 
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        self.outlineView.makeRetroRowView(row: outlineView.row(forItem: item))
+        self.outlineView.makeListRowView(row: outlineView.row(forItem: item))
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+        guard let node = item as? SidebarNode, case .section = node.kind else { return Self.rowHeight }
+        let isFirst = roots.first === node
+        return Self.rowHeight + (isFirst ? Self.firstSectionMargin : Self.sectionMargin)
     }
 
     func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
         guard let node = item as? SidebarNode else { return nil }
         let cell = outlineView.makeView(withIdentifier: SidebarCellView.identifier, owner: self) as? SidebarCellView
             ?? SidebarCellView()
-        cell.configure(node, theme: theme)
+        cell.configure(node, level: outlineView.level(forItem: node), isExpanded: outlineView.isItemExpanded(node), theme: theme)
+        cell.onToggle = { [weak self, weak node] in
+            guard let self, let node else { return }
+            self.toggle(node)
+        }
         return cell
+    }
+
+    /// Turns the chevron of `node`'s visible cell.
+    private func updateDisclosure(of node: SidebarNode) {
+        let row = outlineView.row(forItem: node)
+        guard row >= 0,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? SidebarCellView
+        else { return }
+        cell.setExpanded(outlineView.isItemExpanded(node))
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -362,9 +392,9 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
     }
 
     private func persistExpansion(_ notification: Notification, expanded: Bool) {
-        guard !isRestoring, filterText.isEmpty,
-              let node = notification.userInfo?["NSObject"] as? SidebarNode
-        else { return }
+        guard let node = notification.userInfo?["NSObject"] as? SidebarNode else { return }
+        updateDisclosure(of: node)
+        guard !isRestoring, filterText.isEmpty else { return }
         expansion.set(node.id, expanded: expanded)
         if expanded {
             // Children keep their own remembered state.

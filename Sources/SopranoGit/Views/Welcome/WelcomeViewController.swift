@@ -1,6 +1,6 @@
 import AppKit
 
-/// The tab content without a repository: stripe + "SOPRANO GIT", a
+/// The tab content without a repository: the New York "Soprano Git" hero, a
 /// keyboard-navigable list of recent repositories, key hints, and any error
 /// from the last open attempt (e.g. git missing).
 @MainActor
@@ -12,18 +12,19 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
     private var recents: [URL] = []
     private var theme: AppTheme
 
-    private let stripe = RetroStripeView(layout: .slanted)
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(labelWithString: "")
     private let errorBox = NSView()
-    private let errorLamp = NSView()
+    private let errorMark = ChromeStatusMark(shape: .diamond)
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
-    private var heading: RetroHeadingView!
-    private let tableView = RetroTableView()
+    private var heading: ChromeEyebrowView!
+    private let tableView = ListTableView()
     private var scrollView: NSScrollView!
     private let emptyLabel = NSTextField(labelWithString: "")
-    private let hintStack = NSStackView()
+    private var hintsView: HintsView!
     private var tableHeight: NSLayoutConstraint!
+
+    static let rowHeight: CGFloat = 40
 
     init(state: AppStateStore) {
         self.state = state
@@ -55,17 +56,16 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
         let root = NSView()
         root.wantsLayer = true
 
-        heading = RetroHeadingView(title: "Recent Repositories", theme: theme)
+        heading = ChromeEyebrowView(title: "Recent", theme: theme)
+        hintsView = HintsView(theme: theme)
         let column = NSView()
         column.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(column)
 
         errorBox.wantsLayer = true
-        errorLamp.wantsLayer = true
-        errorLamp.layer?.cornerRadius = 4
-        errorLabel.font = RetroFont.body(12)
+        errorBox.layer?.cornerRadius = Chrome.Radius.card
         errorLabel.isSelectable = true
-        for view in [errorLamp, errorLabel] {
+        for view in [errorMark, errorLabel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             errorBox.addSubview(view)
         }
@@ -76,16 +76,15 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
         tableView.delegate = self
         tableView.target = self
         tableView.doubleAction = #selector(openClicked)
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: 40)
-        scrollView = RetroListStyle.makeScrollView(documentView: tableView, theme: theme)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: Self.rowHeight, surface: .base)
+        scrollView = ListStyle.makeScrollView(documentView: tableView, theme: theme, surface: .base)
 
-        for view in [stripe, titleLabel, subtitleLabel, errorBox, heading, scrollView, emptyLabel, hintStack] as [NSView] {
+        for view in [titleLabel, subtitleLabel, errorBox, heading, scrollView, emptyLabel, hintsView] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             column.addSubview(view)
         }
-        hintStack.spacing = 14
 
-        tableHeight = scrollView.heightAnchor.constraint(equalToConstant: 40)
+        tableHeight = scrollView.heightAnchor.constraint(equalToConstant: Self.rowHeight)
         NSLayoutConstraint.activate([
             column.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             column.centerYAnchor.constraint(equalTo: root.centerYAnchor, constant: -20),
@@ -93,39 +92,33 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
             column.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: 24),
             column.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24),
 
-            stripe.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            stripe.topAnchor.constraint(equalTo: column.topAnchor),
-            stripe.widthAnchor.constraint(equalToConstant: 44),
-            stripe.heightAnchor.constraint(equalToConstant: 22),
-            titleLabel.leadingAnchor.constraint(equalTo: stripe.trailingAnchor, constant: 14),
-            titleLabel.centerYAnchor.constraint(equalTo: stripe.centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: column.topAnchor),
             subtitleLabel.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            subtitleLabel.topAnchor.constraint(equalTo: stripe.bottomAnchor, constant: 12),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 6),
 
             errorBox.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             errorBox.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-            errorBox.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 18),
-            errorLamp.leadingAnchor.constraint(equalTo: errorBox.leadingAnchor, constant: 12),
-            errorLamp.topAnchor.constraint(equalTo: errorBox.topAnchor, constant: 14),
-            errorLamp.widthAnchor.constraint(equalToConstant: 8),
-            errorLamp.heightAnchor.constraint(equalToConstant: 8),
-            errorLabel.leadingAnchor.constraint(equalTo: errorLamp.trailingAnchor, constant: 10),
+            errorBox.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 20),
+            errorMark.leadingAnchor.constraint(equalTo: errorBox.leadingAnchor, constant: 12),
+            errorMark.topAnchor.constraint(equalTo: errorBox.topAnchor, constant: 15),
+            errorLabel.leadingAnchor.constraint(equalTo: errorMark.trailingAnchor, constant: 10),
             errorLabel.trailingAnchor.constraint(equalTo: errorBox.trailingAnchor, constant: -12),
             errorLabel.topAnchor.constraint(equalTo: errorBox.topAnchor, constant: 10),
             errorLabel.bottomAnchor.constraint(equalTo: errorBox.bottomAnchor, constant: -10),
 
             heading.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             heading.trailingAnchor.constraint(equalTo: column.trailingAnchor),
-            heading.topAnchor.constraint(equalTo: errorBox.bottomAnchor, constant: 22),
+            heading.topAnchor.constraint(equalTo: errorBox.bottomAnchor, constant: 24),
             scrollView.leadingAnchor.constraint(equalTo: column.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: column.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 8),
             tableHeight,
-            emptyLabel.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: 10),
+            emptyLabel.leadingAnchor.constraint(equalTo: column.leadingAnchor, constant: 16),
             emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
-            hintStack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
-            hintStack.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 18),
-            hintStack.bottomAnchor.constraint(equalTo: column.bottomAnchor),
+            hintsView.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            hintsView.topAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: 20),
+            hintsView.bottomAnchor.constraint(equalTo: column.bottomAnchor),
         ])
         view = root
         applyTheme()
@@ -143,19 +136,18 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
     private func applyTheme() {
         let colors = theme.colors
         view.layer?.backgroundColor = colors.bgBase.cgColor
-        stripe.colors = colors.stripe
-        titleLabel.setRetroText("Soprano Git", color: colors.accent, size: 22, glow: true)
-        subtitleLabel.setRetroText("Keyboard-first Git · open a repository to begin", color: colors.textMuted)
+        titleLabel.setChromeText("Soprano Git", font: ChromeFont.title, color: colors.textPrimary, tracking: -0.4)
+        subtitleLabel.setChromeText("Keyboard-first Git · open a repository to begin", font: ChromeFont.row, color: colors.textMuted)
         heading.apply(theme: theme)
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: 40)
-        RetroListStyle.applyScrollView(scrollView, theme: theme)
-        emptyLabel.setRetroText("No recent repositories yet", color: colors.textMuted)
-        errorBox.layer?.backgroundColor = colors.bgRaised.cgColor
-        errorBox.layer?.borderColor = colors.danger.cgColor
-        errorBox.layer?.borderWidth = Retro.hairline
-        RetroLamp.light(errorLamp, color: colors.danger)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: Self.rowHeight, surface: .base)
+        ListStyle.applyScrollView(scrollView, theme: theme, surface: .base)
+        emptyLabel.setChromeText("No recent repositories yet", font: ChromeFont.empty, color: colors.textMuted)
+        errorBox.layer?.backgroundColor = colors.errorWash.cgColor
+        errorMark.set(status: .error, colors: colors)
+        errorLabel.font = ChromeFont.label
         errorLabel.textColor = colors.textPrimary
         tableView.reloadData()
+        hintsView.apply(theme: theme)
         rebuildHints()
     }
 
@@ -183,25 +175,25 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
         updateError()
     }
 
-    private func rebuildHints() {
-        hintStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let settings = SettingsCenter.shared
-        let hints: [(String?, String)] = [
-            (settings.keycapText(for: "repo.open"), "Open"),
-            ("↵", "Open Selected"),
-            ("J K", "Move"),
-            (settings.keycapText(for: "palette.open"), "Commands"),
-            (settings.keycapText(for: "help.shortcuts"), "Shortcuts"),
+    /// The hint row: open, open selected, move, commands, shortcuts, each with
+    /// its live K1 caps; unbound commands drop out.
+    static func hints(settings: SettingsCenter) -> [HintsView.Hint] {
+        let move = (settings.keycaps(for: "welcome.next") ?? []) + (settings.keycaps(for: "welcome.previous") ?? [])
+        let entries: [([String]?, String)] = [
+            (settings.keycaps(for: "repo.open"), "Open"),
+            (settings.keycaps(for: "welcome.open"), "Open Selected"),
+            (move.isEmpty ? nil : move, "Move"),
+            (settings.keycaps(for: "palette.open"), "Commands"),
+            (settings.keycaps(for: "help.shortcuts"), "Shortcuts"),
         ]
-        for (key, label) in hints {
-            guard let key else { continue }
-            let keycap = KeycapView(text: key, theme: theme)
-            let text = NSTextField(labelWithString: "")
-            text.setRetroText(label, color: theme.colors.textMuted)
-            let pair = NSStackView(views: [keycap, text])
-            pair.spacing = 6
-            hintStack.addArrangedSubview(pair)
-        }
+        return entries.compactMap { caps, label in caps.map { HintsView.Hint(caps: $0, label: label) } }
+    }
+
+    /// The hints currently shown (tests).
+    var hints: [HintsView.Hint] { hintsView?.hints ?? [] }
+
+    private func rebuildHints() {
+        hintsView.hints = Self.hints(settings: SettingsCenter.shared)
     }
 
     // MARK: - Keyboard (welcome.* commands)
@@ -236,7 +228,7 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        self.tableView.makeRetroRowView(row: row)
+        self.tableView.makeListRowView(row: row)
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -254,29 +246,29 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
     }
 }
 
+/// A recent repository: name (SF Pro 13) over its path (SF Mono 11 muted),
+/// with the row's number as a trailing cap.
 private final class RecentRepositoryCell: NSTableCellView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let pathLabel = NSTextField(labelWithString: "")
-    private let numberLabel = NSTextField(labelWithString: "")
+    private var indexCap: ChromeKeycapView?
 
     init() {
         super.init(frame: .zero)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         nameLabel.lineBreakMode = .byTruncatingTail
-        for view in [numberLabel, nameLabel, pathLabel] {
+        for view in [nameLabel, pathLabel] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            numberLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            numberLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            numberLabel.widthAnchor.constraint(equalToConstant: 16),
-            nameLabel.leadingAnchor.constraint(equalTo: numberLabel.trailingAnchor, constant: 8),
-            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            // Clears the pencil tick (pill inset 4 + tick inset 4 + 2 wide).
+            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            nameLabel.topAnchor.constraint(equalTo: topAnchor, constant: 5),
+            nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -40),
             pathLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
-            pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 3),
-            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
+            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -40),
         ])
     }
 
@@ -287,10 +279,17 @@ private final class RecentRepositoryCell: NSTableCellView {
 
     func configure(name: String, path: String, index: Int?, theme: AppTheme, dimmed: Bool) {
         let colors = theme.colors
-        nameLabel.setRetroText(name, color: dimmed ? colors.textMuted : colors.textPrimary)
-        pathLabel.stringValue = path
-        pathLabel.font = RetroFont.body(11)
-        pathLabel.textColor = colors.textMuted
-        numberLabel.setRetroText(index.map(String.init) ?? "", color: colors.textMuted)
+        nameLabel.setChromeText(name, font: ChromeFont.row, color: dimmed ? colors.textMuted : colors.textPrimary)
+        pathLabel.setChromeText(path, font: ChromeFont.monoSmall, color: colors.textMuted)
+        indexCap?.removeFromSuperview()
+        indexCap = nil
+        guard let index else { return }
+        let cap = ChromeKeycapView(legend: String(index), theme: theme, style: .small, tone: .muted)
+        addSubview(cap)
+        NSLayoutConstraint.activate([
+            cap.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            cap.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        indexCap = cap
     }
 }

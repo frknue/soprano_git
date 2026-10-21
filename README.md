@@ -4,7 +4,7 @@
 
 Soprano Git takes GitKraken's layout (the commit graph in the middle, branches and tags
 on the left, the commit panel on the right) and GitKraken's shortcuts, and builds them in
-Soprano's "Mission Control" chrome. Everything you can click has a key. Every key can be
+Soprano's Folio chrome. Everything you can click has a key. Every key can be
 changed in `settings.json`.
 
 It drives the `git` CLI you already have, so your config, credentials, hooks and signing
@@ -159,7 +159,8 @@ listed at the top. "Open settings.json" (palette or app menu) opens the file its
 
 ```jsonc
 {
-  // A Soprano theme id, or "soprano" to follow Soprano's own theme setting.
+  // "soprano" follows Soprano's theme and appearance, "folio" follows macOS,
+  // "folio-paper" / "folio-ink" pin one, or any other Soprano theme id.
   "theme": "soprano",
   "git": {
     "path": null,            // auto: Homebrew git, then the Command Line Tools git
@@ -199,5 +200,4 @@ describes the modules, and `docs/ROADMAP.md` lists what comes next.
 
 ## License
 
-[MIT](LICENSE). Departure Mono is © Helena Zhang, SIL Open Font License
-(`Support/Licenses/LICENSE-departure-mono`).
+[MIT](LICENSE).

@@ -236,7 +236,7 @@ struct CommitGraphViewControllerTests {
         #expect(graph.matchState(row("Feat: lexer")) == .none)
     }
 
-    @Test func refPillsComeFromTheRefsAndTheHeadBranchIsLit() async throws {
+    @Test func refPillsComeFromTheRefsAndTheHeadBranchIsTheInkPill() async throws {
         let harness = try await makeGraph { script in
             try await script.commit("first", ["a.txt": "a"])
             try await script.git("tag", "v1")

@@ -9,7 +9,8 @@ struct AppSettings: Equatable, Sendable {
         case absolute
     }
 
-    /// An id from `AppTheme.allThemes`, or "soprano" to follow Soprano's own theme setting.
+    /// An id from `AppTheme.options` (`folio` follows the macOS appearance), or
+    /// "soprano" to follow Soprano's own `theme` and `appearance` settings.
     var theme: String = "soprano"
     /// Explicit git executable; nil = auto-detect.
     var gitPath: String?
@@ -25,17 +26,28 @@ struct AppSettings: Equatable, Sendable {
 
 private let settingsLog = Logger(subsystem: "com.soprano.git", category: "settings")
 
+/// How `folio` picks Paper or Ink. Mirrors the `appearance` key of Soprano's
+/// settings.json: follow macOS, or pin light (Paper) or dark (Ink).
+enum AppearancePreference: String, Codable, CaseIterable, Sendable {
+    case system
+    case light
+    case dark
+}
+
 /// The live theme. Views read `theme` when they build and re-style in their
 /// observer when it changes.
 ///
-/// `theme: "soprano"` follows the `theme` key of Soprano's settings.json
-/// (watched live); Mission Control when that file or key is missing or unknown.
+/// `theme: "soprano"` follows the `theme` and `appearance` keys of Soprano's
+/// settings.json (watched live); Folio when that file, key or id is missing or
+/// unknown. `folio` resolves to Folio Paper or Folio Ink by appearance, so a
+/// macOS light/dark flip changes the theme too.
 @MainActor
 final class ThemeCenter {
     static let shared = ThemeCenter()
 
-    /// Vendored manager, for Soprano components that take one (CommandPalettePanel).
-    let manager = ThemeManager(themeId: AppTheme.missionControl.id)
+    /// Vendored manager: resolves id + appearance into the palette and drives
+    /// `NSApp.appearance`; Soprano components (CommandPalettePanel) take it.
+    let manager = ThemeManager(themeId: AppTheme.folioId)
 
     var theme: AppTheme { manager.currentTheme }
 
@@ -54,6 +66,9 @@ final class ThemeCenter {
 
     init(sopranoSettingsURL: URL = SettingsFile.sopranoURL()) {
         self.sopranoSettingsURL = sopranoSettingsURL
+        manager.onThemeChanged = { [weak self] theme in
+            self?.observers.notify(theme)
+        }
     }
 
     /// Handlers fire after the theme changes, until `owner` is deallocated.
@@ -74,33 +89,60 @@ final class ThemeCenter {
         applyResolvedTheme()
     }
 
-    /// The theme id `setting` resolves to, given Soprano's settings text.
-    nonisolated static func resolveThemeID(setting: String, sopranoSettingsText: String?) -> String {
+    /// Lets the theme drive `NSApp.appearance` and follow macOS light/dark
+    /// changes. Called once by the app at launch; snapshots and tests never do.
+    func startDrivingApplicationAppearance() {
+        manager.startDrivingApplicationAppearance()
+    }
+
+    /// The concrete palette id `setting` resolves to, given Soprano's settings
+    /// text and the system appearance (`folio` → `folio-paper` / `folio-ink`).
+    nonisolated static func resolveThemeID(
+        setting: String,
+        sopranoSettingsText: String?,
+        systemAppearance: AppTheme.Appearance
+    ) -> String {
+        let source = themeSource(setting: setting, sopranoSettingsText: sopranoSettingsText)
+        let effective: AppTheme.Appearance = switch source.appearance {
+        case .system: systemAppearance
+        case .light: .light
+        case .dark: .dark
+        }
+        return AppTheme.theme(for: source.themeId, appearance: effective).id
+    }
+
+    /// The theme id and appearance preference handed to the manager: Soprano's
+    /// `theme` + `appearance` for "soprano", otherwise the own id under the
+    /// system appearance. Unknown ids become `folio`.
+    private nonisolated static func themeSource(
+        setting: String,
+        sopranoSettingsText: String?
+    ) -> (themeId: String, appearance: AppearancePreference) {
         guard setting == "soprano" else {
-            return AppTheme.allThemes.contains(where: { $0.id == setting }) ? setting : AppTheme.missionControl.id
+            return (AppTheme.isKnownId(setting) ? setting : AppTheme.folioId, .system)
         }
         guard let text = sopranoSettingsText,
               let data = try? JSONCText.strictJSONData(from: text),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = root["theme"] as? String,
-              AppTheme.allThemes.contains(where: { $0.id == id })
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            return AppTheme.missionControl.id
+            return (AppTheme.folioId, .system)
         }
-        return id
+        let themeId = (root["theme"] as? String).flatMap { AppTheme.isKnownId($0) ? $0 : nil } ?? AppTheme.folioId
+        let appearance = (root["appearance"] as? String).flatMap(AppearancePreference.init(rawValue:)) ?? .system
+        return (themeId, appearance)
     }
 
+    /// Hands the resolved source to the manager, which notifies observers
+    /// (through `onThemeChanged`) only when the concrete palette changes.
     private func applyResolvedTheme() {
-        let id: String
+        let source: (themeId: String, appearance: AppearancePreference)
         if let forcedThemeID {
-            id = AppTheme.theme(for: forcedThemeID).id
+            source = (AppTheme.isKnownId(forcedThemeID) ? forcedThemeID : AppTheme.folioId, .system)
         } else {
             let text = setting == "soprano" ? (try? SettingsFile.read(at: sopranoSettingsURL)) ?? nil : nil
-            id = Self.resolveThemeID(setting: setting, sopranoSettingsText: text)
+            source = Self.themeSource(setting: setting, sopranoSettingsText: text)
         }
-        guard id != manager.currentTheme.id else { return }
-        manager.setTheme(id: id)
-        observers.notify(manager.currentTheme)
+        manager.update(themeId: source.themeId, appearance: source.appearance)
     }
 
     private func updateSopranoWatcher() {
@@ -242,9 +284,9 @@ final class SettingsCenter {
         chords(for: commandID).first?.displayString
     }
 
-    /// Compact keycap text of the first chord ("⌘B", "⌃A P"), nil when unbound.
-    func keycapText(for commandID: String) -> String? {
-        chords(for: commandID).first?.compactText(prefixKey: keymap.prefixKey)
+    /// K1 keycaps of the command's first chord (`["⌘B"]`, `["⌃A", "P"]`), nil when unbound.
+    func keycaps(for commandID: String) -> [String]? {
+        chords(for: commandID).first?.keycaps(prefixKey: keymap.prefixKey)
     }
 
     /// Handlers fire after settings.json changes, until `owner` is deallocated.

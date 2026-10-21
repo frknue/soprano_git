@@ -15,9 +15,9 @@ struct DialogOption: Equatable {
     }
 }
 
-/// Keyboard-first modal dialogs in the Mission Control chrome, attached to a
-/// window as a sheet (centered panel when `window` is nil). Return confirms,
-/// Esc cancels, j/k or arrows move between options, option keys pick directly.
+/// Keyboard-first modal dialogs, attached to a window as a sheet (centered
+/// panel when `window` is nil). Return confirms, Esc cancels, j/k or arrows
+/// move between options, option keys pick directly.
 @MainActor
 enum Dialogs {
     /// Asks for one line of text. `validate` returns an error message to show
@@ -138,10 +138,13 @@ enum DialogResult: Equatable {
     case option(Int)
 }
 
-/// The Mission Control dialog window: stripe + title, double rule, message,
-/// an input / option list, inline error, and keyed buttons.
+/// The dialog window (`.dialog`): a raised 480 pt surface with a 10 pt radius,
+/// a `borderSubtle` edge and the e3 shadow; New York headline, muted SF Pro
+/// message, an input or option list, an inline error, then key hints and the
+/// Cancel / confirm buttons (ink, or danger fill when destructive).
 @MainActor
 final class DialogPanel: NSPanel, NSTextFieldDelegate {
+    /// Width of the visible surface; the window adds the shadow margin.
     static let width: CGFloat = 480
     private(set) static weak var current: DialogPanel?
 
@@ -149,19 +152,17 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
     private let theme: AppTheme
     private var continuation: CheckedContinuation<DialogResult, Never>?
 
-    private let root = DialogRootView()
-    private let stripe = RetroStripeView(layout: .slanted)
-    private let titleLabel = NSTextField(labelWithString: "")
-    private let headerRule = RetroRuleView(axis: .horizontal, style: .double)
+    private let root = DialogRootView(radius: Chrome.Radius.popover)
+    private let titleLabel = NSTextField(wrappingLabelWithString: "")
     private let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private var inputContainer: NSView?
+    private var inputSurface: ChromeFieldView?
     private(set) var inputField: NSTextField?
     private let errorLabel = NSTextField(labelWithString: "")
     private var optionRows: [DialogOptionRow] = []
     private(set) var selectedOption = 0
-    private let hintLabel = NSTextField(labelWithString: "")
-    private var cancelButton: RetroButton!
-    private var confirmButton: RetroButton!
+    private(set) var hintsView: HintsView!
+    private(set) var cancelButton: ChromeButton!
+    private(set) var confirmButton: ChromeButton!
     private var hasEdited = false
 
     static func present(_ spec: DialogSpec, in window: NSWindow?) async -> DialogResult {
@@ -176,7 +177,7 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         self.spec = spec
         self.theme = theme
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: Self.width + FloatingSurfaceView.horizontalMargin, height: 200),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -184,8 +185,9 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         isReleasedWhenClosed = false
         backgroundColor = .clear
         isOpaque = false
-        hasShadow = true
-        appearance = NSAppearance(named: .darkAqua)
+        // The surface layer draws the e3 shadow inside the transparent margin.
+        hasShadow = false
+        appearance = theme.appearance.nsAppearance
         animationBehavior = .none
         root.onKey = { [weak self] event in self?.handleKey(event) ?? false }
         contentView = root
@@ -204,22 +206,17 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
 
     private func build() {
         let colors = theme.colors
-        let accent = spec.isDestructive ? colors.danger : colors.accent
-        root.wantsLayer = true
-        root.layer?.backgroundColor = colors.bgPanel.cgColor
-        root.layer?.borderColor = colors.borderStrong.cgColor
-        root.layer?.borderWidth = Retro.hairline
+        root.apply(theme: theme)
+        let surface = root.surface
 
-        stripe.colors = spec.isDestructive ? [colors.danger, colors.danger.withAlphaComponent(0.6), colors.accentStrong] : colors.stripe
-        titleLabel.setRetroText(spec.title, color: accent, glow: true)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        headerRule.color = colors.borderStrong
+        titleLabel.setChromeText(spec.title, font: ChromeFont.headline, color: colors.textPrimary)
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.preferredMaxLayoutWidth = Self.width - 40
+        titleLabel.isSelectable = false
 
         var arranged: [NSView] = []
         if let message = spec.message, !message.isEmpty {
-            messageLabel.stringValue = message
-            messageLabel.font = RetroFont.body(12)
-            messageLabel.textColor = colors.textPrimary
+            messageLabel.attributedStringValue = Self.message(message, colors: colors)
             messageLabel.preferredMaxLayoutWidth = Self.width - 40
             messageLabel.isSelectable = false
             arranged.append(messageLabel)
@@ -227,45 +224,27 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
 
         switch spec.kind {
         case let .prompt(placeholder, initialValue, isSecure, _):
-            let container = NSView()
-            container.wantsLayer = true
-            container.layer?.backgroundColor = colors.bgRaised.cgColor
-            container.layer?.borderColor = colors.borderStrong.cgColor
-            container.layer?.borderWidth = Retro.hairline
-            let prompt = NSTextField(labelWithString: "")
-            prompt.setRetroText("❯", color: colors.accent)
-            prompt.translatesAutoresizingMaskIntoConstraints = false
+            let container = ChromeFieldView(theme: theme)
             let field: NSTextField = isSecure ? NSSecureTextField(string: initialValue) : NSTextField(string: initialValue)
-            field.isBordered = false
-            field.drawsBackground = false
-            field.focusRingType = .none
-            field.font = RetroFont.body(13)
-            field.textColor = colors.textPrimary
+            ChromeFieldView.styleEmbedded(field, colors: colors, font: ChromeFont.row)
             field.delegate = self
             field.cell?.isScrollable = true
             field.cell?.wraps = false
             if let placeholder {
-                field.placeholderAttributedString = NSAttributedString(
-                    string: placeholder,
-                    attributes: [.foregroundColor: colors.textMuted, .font: RetroFont.body(13)]
-                )
+                field.placeholderAttributedString = ChromeText.attributed(placeholder, font: ChromeFont.row, color: colors.textMuted)
             }
             field.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(prompt)
             container.addSubview(field)
-            container.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                container.heightAnchor.constraint(equalToConstant: 34),
-                prompt.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
-                prompt.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                field.leadingAnchor.constraint(equalTo: prompt.trailingAnchor, constant: 8),
-                field.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+                container.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
+                field.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+                field.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
                 field.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             ])
-            inputContainer = container
+            inputSurface = container
             inputField = field
             arranged.append(container)
-            errorLabel.font = RetroFont.body(11)
+            errorLabel.font = ChromeFont.meta
             errorLabel.textColor = colors.danger
             errorLabel.lineBreakMode = .byTruncatingTail
             errorLabel.isHidden = true
@@ -294,62 +273,66 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
             arranged.append(list)
         }
 
-        cancelButton = RetroButton(title: "Cancel", theme: theme, target: self, action: #selector(cancelClicked))
+        cancelButton = ChromeButton(title: "Cancel", theme: theme, kind: .standard, target: self, action: #selector(cancelClicked))
         cancelButton.refusesFirstResponder = true
-        let confirmTheme = spec.isDestructive ? theme.withAccent(colors.danger) : theme
-        confirmButton = RetroButton(title: spec.confirmTitle, theme: confirmTheme, kind: .prominent, target: self, action: #selector(confirmClicked))
+        confirmButton = ChromeButton(
+            title: spec.confirmTitle,
+            theme: theme,
+            kind: spec.isDestructive ? .danger : .ink,
+            target: self,
+            action: #selector(confirmClicked)
+        )
         confirmButton.refusesFirstResponder = true
 
-        var hints: [String] = []
+        var hints: [HintsView.Hint] = []
         if case .choose = spec.kind {
-            hints.append("j k  Move")
+            hints.append(HintsView.Hint(caps: ["J", "K"], label: "Move"))
         } else {
-            hints.append("↵  \(spec.confirmTitle)")
+            hints.append(HintsView.Hint(caps: ["↵"], label: spec.confirmTitle))
         }
-        hints.append(spec.showsCancel ? "esc  Cancel" : "esc  Close")
-        hintLabel.setRetroText(hints.joined(separator: "    "), color: colors.textMuted)
+        hints.append(HintsView.Hint(caps: ["esc"], label: spec.showsCancel ? "Cancel" : "Close"))
+        hintsView = HintsView(hints: hints, theme: theme)
+        hintsView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         cancelButton.isHidden = !spec.showsCancel
-        let buttons = NSStackView(views: [cancelButton, confirmButton])
-        buttons.spacing = 8
-        let footer = NSStackView(views: [hintLabel, NSView(), buttons])
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let footer = NSStackView(views: [hintsView, spacer, cancelButton, confirmButton])
         footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.spacing = 8
         footer.distribution = .fill
         footer.translatesAutoresizingMaskIntoConstraints = false
 
         let body = NSStackView(views: arranged)
         body.orientation = .vertical
         body.alignment = .leading
-        body.spacing = 10
+        body.spacing = 12
         body.translatesAutoresizingMaskIntoConstraints = false
         for view in arranged {
             view.widthAnchor.constraint(equalTo: body.widthAnchor).isActive = true
         }
+        // The error sits close under its field.
+        if let inputSurface { body.setCustomSpacing(6, after: inputSurface) }
 
-        for view in [stripe, titleLabel, headerRule, body, footer] as [NSView] {
+        for view in [titleLabel, body, footer] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(view)
+            surface.addSubview(view)
         }
         let hasBody = !arranged.isEmpty
         NSLayoutConstraint.activate([
-            root.widthAnchor.constraint(equalToConstant: Self.width),
-            stripe.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            stripe.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            stripe.widthAnchor.constraint(equalToConstant: 22),
-            stripe.heightAnchor.constraint(equalToConstant: 12),
-            titleLabel.leadingAnchor.constraint(equalTo: stripe.trailingAnchor, constant: 10),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -20),
-            titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
-            headerRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            headerRule.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            headerRule.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
-            body.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            body.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            body.topAnchor.constraint(equalTo: headerRule.bottomAnchor, constant: hasBody ? 16 : 0),
-            footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            footer.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
-            footer.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 18),
-            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
+            surface.widthAnchor.constraint(equalToConstant: Self.width),
+            titleLabel.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -20),
+            titleLabel.topAnchor.constraint(equalTo: surface.topAnchor, constant: 20),
+            body.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
+            body.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -20),
+            body.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: hasBody ? 12 : 0),
+            footer.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
+            footer.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -20),
+            // `.dialog` gap 12 plus the actions' 4 pt top margin.
+            footer.topAnchor.constraint(equalTo: body.bottomAnchor, constant: 16),
+            footer.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -16),
         ])
         if !hasBody {
             body.heightAnchor.constraint(equalToConstant: 0).isActive = true
@@ -358,6 +341,19 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         validateInput()
         root.layoutSubtreeIfNeeded()
         setContentSize(root.fittingSize)
+    }
+
+    /// `.dialog-body`: SF Pro 13 on a 19 pt line, muted.
+    private static func message(_ text: String, colors: ThemeColors) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 19
+        paragraph.maximumLineHeight = 19
+        paragraph.lineBreakMode = .byWordWrapping
+        return NSAttributedString(string: text, attributes: [
+            .font: ChromeFont.row,
+            .foregroundColor: colors.textMuted,
+            .paragraphStyle: paragraph,
+        ])
     }
 
     // MARK: - Presentation
@@ -375,7 +371,7 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
             // Sheet position (top center, under the tab bar) as a child panel.
             setFrameOrigin(NSPoint(
                 x: window.frame.midX - frame.width / 2,
-                y: window.frame.maxY - TabBarView.height - frame.height
+                y: window.frame.maxY - TabBarView.height - frame.height + FloatingSurfaceView.margins.top
             ))
             window.addChildWindow(self, ordered: .above)
             orderFrontRegardless()
@@ -391,6 +387,8 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         if let inputField {
             makeFirstResponder(inputField)
             inputField.currentEditor()?.selectAll(nil)
+            ChromeFieldView.styleEditor(of: inputField, colors: theme.colors)
+            inputSurface?.isFocused = true
         } else {
             makeFirstResponder(root)
         }
@@ -419,6 +417,9 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         return nil
     }
 
+    /// Whether the prompt shows its inline error and danger edge (tests).
+    var showsError: Bool { !errorLabel.isHidden }
+
     private func validateInput() {
         guard case .prompt = spec.kind else { return }
         let message = validationMessage
@@ -426,7 +427,13 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         let showsMessage = message != nil && (hasEdited || !currentValue.isEmpty)
         errorLabel.stringValue = message ?? ""
         errorLabel.isHidden = !showsMessage
-        inputContainer?.layer?.borderColor = (showsMessage ? theme.colors.danger : theme.colors.borderStrong).cgColor
+        inputSurface?.isInvalid = showsMessage
+    }
+
+    func controlTextDidBeginEditing(_ obj: Notification) {
+        guard let inputField else { return }
+        ChromeFieldView.styleEditor(of: inputField, colors: theme.colors)
+        inputSurface?.isFocused = true
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -500,6 +507,9 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
         }
     }
 
+    /// The selection pill style of each option row (tests).
+    var optionRowStyles: [ChromeSelectionPill.Style] { optionRows.map(\.pillStyle) }
+
     func confirm() {
         switch spec.kind {
         case .prompt:
@@ -534,8 +544,53 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
     }
 }
 
+/// The content view of a floating panel (dialog, shortcut sheet): a
+/// transparent root that leaves room for the e3 shadow around `surface`, a
+/// `bgRaised` rounded surface with a `borderSubtle` edge. Lay content out in
+/// `surface`; the window is the surface plus `margins`.
+class FloatingSurfaceView: NSView {
+    /// Room for the e3 shadow (offset 12–14 down, blur 36–40).
+    static let margins = NSEdgeInsets(top: 28, left: 40, bottom: 56, right: 40)
+    static var horizontalMargin: CGFloat { margins.left + margins.right }
+    static var verticalMargin: CGFloat { margins.top + margins.bottom }
+
+    let surface = NSView()
+    private let radius: CGFloat
+
+    init(radius: CGFloat) {
+        self.radius = radius
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = false
+        surface.wantsLayer = true
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(surface)
+        let margins = Self.margins
+        NSLayoutConstraint.activate([
+            surface.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margins.left),
+            surface.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margins.right),
+            surface.topAnchor.constraint(equalTo: topAnchor, constant: margins.top),
+            surface.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margins.bottom),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    func apply(theme: AppTheme) {
+        guard let layer = surface.layer else { return }
+        let colors = theme.colors
+        ChromeSurface.applyFloating(to: layer, colors: colors, radius: radius, shadow: colors.shadowE3)
+        layer.backgroundColor = colors.bgRaised.cgColor
+        layer.borderWidth = Chrome.hairline
+        layer.borderColor = colors.borderSubtle.cgColor
+    }
+}
+
 /// Dialog content view: first responder while no field is focused.
-private final class DialogRootView: NSView {
+private final class DialogRootView: FloatingSurfaceView {
     var onKey: ((NSEvent) -> Bool)?
 
     override var acceptsFirstResponder: Bool { true }
@@ -546,33 +601,42 @@ private final class DialogRootView: NSView {
     }
 }
 
-/// One choice: keycap, title, detail; highlighted = accent block (palette row look).
+/// One choice: keycap, title, detail. The highlighted option is the focused
+/// selection pill with its pencil tick; destructive titles are danger.
 private final class DialogOptionRow: NSView {
     var onClick: (() -> Void)?
     var onHover: (() -> Void)?
     var isHighlighted = false {
-        didSet { applyColors() }
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            needsDisplay = true
+        }
     }
+
+    var pillStyle: ChromeSelectionPill.Style { isHighlighted ? .selected : .none }
 
     private let option: DialogOption
     private let theme: AppTheme
-    private let keycap: KeycapView?
+    private let keycap: ChromeKeycapView?
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
 
     init(option: DialogOption, theme: AppTheme) {
         self.option = option
         self.theme = theme
-        keycap = option.key.map { KeycapView(text: $0.uppercased(), theme: theme) }
+        keycap = option.key.map { ChromeKeycapView(legend: $0.uppercased(), theme: theme) }
         super.init(frame: .zero)
-        wantsLayer = true
+        let colors = theme.colors
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.setChromeText(option.title, font: ChromeFont.row, color: option.isDestructive ? colors.danger : colors.textPrimary)
         let textStack = NSStackView(views: [titleLabel])
         textStack.orientation = .vertical
         textStack.alignment = .leading
         textStack.spacing = 2
-        if option.detail != nil {
-            textStack.addArrangedSubview(detailLabel)
+        if let detail = option.detail {
             detailLabel.lineBreakMode = .byTruncatingTail
+            detailLabel.setChromeText(detail, font: ChromeFont.meta, color: colors.textMuted)
+            textStack.addArrangedSubview(detailLabel)
         }
         var views: [NSView] = []
         if let keycap { views.append(keycap) }
@@ -583,13 +647,13 @@ private final class DialogOptionRow: NSView {
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            // Clears the pencil tick (4 pt in, 2 wide).
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             row.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
             row.topAnchor.constraint(equalTo: topAnchor, constant: 7),
             row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
         ])
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
-        applyColors()
     }
 
     @available(*, unavailable)
@@ -597,16 +661,8 @@ private final class DialogOptionRow: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    private func applyColors() {
-        let colors = theme.colors
-        let base = option.isDestructive ? colors.danger : colors.textPrimary
-        let fill = option.isDestructive ? colors.danger : colors.accent
-        layer?.backgroundColor = (isHighlighted ? fill : NSColor.clear).cgColor
-        titleLabel.setRetroText(option.title, color: isHighlighted ? colors.bgPanel : base)
-        detailLabel.stringValue = option.detail ?? ""
-        detailLabel.font = RetroFont.body(11)
-        detailLabel.textColor = isHighlighted ? colors.bgPanel : colors.textMuted
-        keycap?.isOnAccent = isHighlighted
+    override func draw(_ dirtyRect: NSRect) {
+        ChromeSelectionPill.draw(pillStyle, in: bounds, colors: theme.colors, inset: 0)
     }
 
     override func mouseEntered(with event: NSEvent) {
@@ -615,24 +671,5 @@ private final class DialogOptionRow: NSView {
 
     override func mouseDown(with event: NSEvent) {
         onClick?()
-    }
-}
-
-extension AppTheme {
-    /// The same theme with another accent (destructive keys light up in `danger`).
-    func withAccent(_ accent: NSColor) -> AppTheme {
-        let c = colors
-        return AppTheme(
-            id: id,
-            name: name,
-            colors: ThemeColors(
-                bgBase: c.bgBase, bgPanel: c.bgPanel, bgRaised: c.bgRaised, bgOverlay: c.bgOverlay,
-                textPrimary: c.textPrimary, textMuted: c.textMuted,
-                accent: accent, accentStrong: accent.blended(withFraction: 0.25, of: .black) ?? accent,
-                borderSubtle: c.borderSubtle, borderStrong: c.borderStrong,
-                success: c.success, danger: c.danger, blue: c.blue, cyan: c.cyan, yellow: c.yellow, gray: c.gray
-            ),
-            terminalColors: terminalColors
-        )
     }
 }

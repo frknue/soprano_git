@@ -2,14 +2,14 @@ import AppKit
 import SopranoGitCore
 
 /// How the diff list shows a hunk's lines: one column of old and new lines
-/// (`unified`), or the old file on the left and the new one on the right
-/// (`split`). App-wide, persisted in `AppStateStore.diffLayout`.
+/// (`unified`, titled Inline), or the old file on the left and the new one on
+/// the right (`split`). App-wide, persisted in `AppStateStore.diffLayout`.
 enum DiffLayout: String, Sendable {
     case unified
     case split
 
     var toggled: DiffLayout { self == .unified ? .split : .unified }
-    var title: String { self == .unified ? "Unified" : "Split" }
+    var title: String { self == .unified ? "Inline" : "Split" }
 }
 
 /// One file's diff flattened into list rows: a header row per hunk followed
@@ -27,6 +27,12 @@ struct DiffDocument: Equatable, Sendable {
         case pair(hunk: Int, old: Int?, new: Int?)
         /// A muted note inside the list (mode change, truncation).
         case notice(String)
+    }
+
+    /// A listed line: `file.hunks[hunk].lines[line]`.
+    struct LineID: Hashable, Sendable {
+        var hunk: Int
+        var line: Int
     }
 
     static let lineLimit = 20_000
@@ -49,6 +55,14 @@ struct DiffDocument: Equatable, Sendable {
     /// sizes the horizontal scroll of the code text.
     var oldColumns = 0
     var newColumns = 0
+    /// Word emphasis (Soprano's `GitDiffLayout.changedRanges`): each removed
+    /// line that faces an added line in the split pairing (the n-th removed
+    /// line of a change block and its n-th added line) maps to the UTF-16
+    /// range of its raw text that differs from the other line. Lines that
+    /// differ throughout, equal pairs and unpaired lines are absent, as is a
+    /// side whose differing range is empty (a pure insertion or deletion
+    /// inside the line). Both layouts use the same ranges.
+    var changedRanges: [LineID: NSRange] = [:]
 
     /// What a "\ No newline at end of file" line shows.
     static let noNewlineText = "No newline at end of file"
@@ -138,6 +152,7 @@ struct DiffDocument: Equatable, Sendable {
         document.rows = rows
         document.hunkRows = hunkRows
         (document.splitRows, document.splitHunkRows) = splitRows(from: rows, file: file)
+        document.changedRanges = changedRanges(splitRows: document.splitRows, file: file)
         for case let .line(hunk, index) in rows {
             let line = file.hunks[hunk].lines[index]
             let width = columns(of: line)
@@ -239,6 +254,62 @@ struct DiffDocument: Equatable, Sendable {
         return (result, hunkRows)
     }
 
+    /// The word emphasis of every split pair that faces a removed line with an
+    /// added one; context pairs, fillers and "no newline" markers carry none.
+    static func changedRanges(splitRows rows: [Row], file: FileDiff) -> [LineID: NSRange] {
+        var ranges: [LineID: NSRange] = [:]
+        for case let .pair(hunk, old?, new?) in rows {
+            let lines = file.hunks[hunk].lines
+            let removed = lines[old]
+            let added = lines[new]
+            guard removed.kind == .removed, added.kind == .added,
+                  let changed = changedRanges(old: removed.text, new: added.text) else { continue }
+            if changed.old.length > 0 { ranges[LineID(hunk: hunk, line: old)] = changed.old }
+            if changed.new.length > 0 { ranges[LineID(hunk: hunk, line: new)] = changed.new }
+        }
+        return ranges
+    }
+
+    /// Soprano's intraline rule: the differing middle of two lines that share
+    /// a prefix or a suffix, as UTF-16 ranges in each, never splitting a
+    /// surrogate pair; nil when the lines share neither end or are equal.
+    static func changedRanges(old: String, new: String) -> (old: NSRange, new: NSRange)? {
+        let oldUnits = old.utf16
+        let newUnits = new.utf16
+        let oldCount = oldUnits.count
+        let newCount = newUnits.count
+        let shorter = min(oldCount, newCount)
+        var prefix = 0
+        var lastShared: UTF16.CodeUnit = 0
+        for (oldUnit, newUnit) in zip(oldUnits, newUnits) {
+            guard oldUnit == newUnit else { break }
+            lastShared = oldUnit
+            prefix += 1
+        }
+        if prefix > 0, prefix < oldCount, UTF16.isLeadSurrogate(lastShared) {
+            prefix -= 1
+        }
+        var suffix = 0
+        var firstShared: UTF16.CodeUnit = 0
+        for (oldUnit, newUnit) in zip(oldUnits.reversed(), newUnits.reversed()) {
+            guard suffix < shorter - prefix, oldUnit == newUnit else { break }
+            firstShared = oldUnit
+            suffix += 1
+        }
+        if suffix > 0, UTF16.isTrailSurrogate(firstShared) {
+            suffix -= 1
+        }
+        let oldLength = oldCount - prefix - suffix
+        let newLength = newCount - prefix - suffix
+        guard prefix > 0 || suffix > 0, oldLength > 0 || newLength > 0 else { return nil }
+        return (NSRange(location: prefix, length: oldLength), NSRange(location: prefix, length: newLength))
+    }
+
+    /// The word emphasis of `file.hunks[hunk].lines[line]`, nil when it has none.
+    func changedRange(hunk: Int, line: Int) -> NSRange? {
+        changedRanges[LineID(hunk: hunk, line: line)]
+    }
+
     private static func modeChangeText(_ file: FileDiff) -> String? {
         guard let old = file.oldMode, let new = file.newMode, old != new else { return nil }
         return "File mode changed from \(old) to \(new)."
@@ -269,6 +340,31 @@ struct DiffDocument: Equatable, Sendable {
         case let .line(hunk, _), let .pair(hunk, _, _): return hunk
         case .notice: return nil
         }
+    }
+
+    /// The first row of hunk `index` that shows a change in `layout`: the
+    /// first added or removed line (unified), or the first pair with one on
+    /// either side (split). The current hunk's pencil tick sits on it.
+    func firstChangedRow(ofHunk index: Int, in layout: DiffLayout) -> Int? {
+        let rows = rows(in: layout)
+        let hunkRows = hunkRows(in: layout)
+        guard let file, hunkRows.indices.contains(index) else { return nil }
+        let lines = file.hunks[index].lines
+        func isChange(_ line: Int?) -> Bool {
+            guard let line else { return false }
+            return lines[line].kind == .added || lines[line].kind == .removed
+        }
+        for row in (hunkRows[index] + 1)..<rows.count {
+            switch rows[row] {
+            case let .line(hunk, line) where hunk == index:
+                if isChange(line) { return row }
+            case let .pair(hunk, old, new) where hunk == index:
+                if isChange(old) || isChange(new) { return row }
+            default:
+                return nil
+            }
+        }
+        return nil
     }
 
     /// The hunk as unified-diff text (header line plus prefixed lines), for copying.

@@ -1,12 +1,16 @@
 import AppKit
 import SopranoGitCore
 
-/// Top of the commit panel in commit and stash mode: summary, body, author
-/// and dates, committer (when someone else), parents as links, ref pills.
+/// Top of the commit panel in commit and stash mode: the subject as a New
+/// York headline, body, ref pills, then a meta grid of author and dates,
+/// committer (when someone else) and parents as SHA links. A hairline closes it.
 final class CommitInfoView: NSView {
     static let maximumBodyHeight: CGFloat = 132
-    static let labelWidth: CGFloat = 84
-    static let inset: CGFloat = 12
+    /// Width of the sentence-case meta labels (`Author`, `Date`, `Parent`).
+    static let labelWidth: CGFloat = 56
+    static let inset: CGFloat = 16
+    /// Height of one meta row.
+    static let metaRowHeight: CGFloat = 18
 
     /// A parent or base commit link was clicked.
     var onSelectCommit: ((String) -> Void)?
@@ -19,10 +23,11 @@ final class CommitInfoView: NSView {
     private var bodyHeight: NSLayoutConstraint!
     private let metaStack = NSStackView()
     private let refsFlow = FlowLayoutView()
+    private let bottomRule = ChromeRuleView(axis: .horizontal, color: .clear)
     private var content: Content?
 
     private enum Content {
-        case commit(CommitDetail, refs: [(String, RefPillView.Kind)])
+        case commit(CommitDetail, refs: [RefPillView.Ref], lane: Int)
         case stash(Stash)
     }
 
@@ -61,24 +66,33 @@ final class CommitInfoView: NSView {
         metaStack.spacing = 4
         metaStack.translatesAutoresizingMaskIntoConstraints = false
 
+        refsFlow.spacing = 6
+        refsFlow.lineSpacing = 6
         refsFlow.translatesAutoresizingMaskIntoConstraints = false
 
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: Self.inset, bottom: 12, right: Self.inset)
+        stack.spacing = 10
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: Self.inset, bottom: 12, right: Self.inset)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for view in [refsFlow, summaryField, bodyScroll, metaStack] as [NSView] {
+        for view in [summaryField, bodyScroll, refsFlow, metaStack] as [NSView] {
             stack.addArrangedSubview(view)
             view.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -Self.inset * 2).isActive = true
         }
+        // The meta grid sits 2 pt lower than the 10 pt gap (`.meta { margin-top: 2px }`).
+        stack.setCustomSpacing(12, after: refsFlow)
         addSubview(stack)
+        addSubview(bottomRule)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            bottomRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bottomRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bottomRule.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        bottomRule.color = theme.colors.borderSubtle
     }
 
     @available(*, unavailable)
@@ -91,8 +105,9 @@ final class CommitInfoView: NSView {
     /// Commit ids offered as links (parents or stash base).
     private(set) var linkedCommits: [String] = []
 
-    func show(_ detail: CommitDetail, refs: [(String, RefPillView.Kind)]) {
-        content = .commit(detail, refs: refs)
+    /// Shows a commit; its ref pills take the color of graph lane `lane`.
+    func show(_ detail: CommitDetail, refs: [RefPillView.Ref], lane: Int) {
+        content = .commit(detail, refs: refs, lane: lane)
         rebuild()
     }
 
@@ -103,6 +118,7 @@ final class CommitInfoView: NSView {
 
     func apply(theme: AppTheme) {
         self.theme = theme
+        bottomRule.color = theme.colors.borderSubtle
         rebuild()
     }
 
@@ -115,11 +131,11 @@ final class CommitInfoView: NSView {
         guard let content else { return }
 
         switch content {
-        case let .commit(detail, refs):
+        case let .commit(detail, refs, lane):
             let commit = detail.commit
             setSummary(commit.summary)
             setBody(detail.body)
-            refsFlow.setViews(refs.map { RefPillView(name: $0.0, kind: $0.1, theme: theme) })
+            refsFlow.setViews(refs.map { RefPillView(ref: $0, lane: lane, theme: theme) })
             refsFlow.isHidden = refs.isEmpty
             addMeta("Author", value: signatureText(commit.author), plain: "\(commit.author.name) <\(commit.author.email)>")
             addMeta("Date", value: dateText(commit.author.date), plain: dateString(commit.author.date))
@@ -143,30 +159,35 @@ final class CommitInfoView: NSView {
         needsLayout = true
     }
 
+    /// The subject: New York 17 Medium on a 22 pt line, wrapping.
     private func setSummary(_ text: String) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 22
+        paragraph.maximumLineHeight = 22
+        paragraph.lineBreakMode = .byWordWrapping
         summaryField.attributedStringValue = NSAttributedString(
             string: text,
-            attributes: [.font: RetroFont.body(13, weight: .semibold), .foregroundColor: theme.colors.textPrimary]
+            attributes: [.font: ChromeFont.headline, .foregroundColor: theme.colors.textPrimary, .paragraphStyle: paragraph]
         )
     }
 
     private func setBody(_ text: String) {
         bodyView.textStorage?.setAttributedString(NSAttributedString(
             string: text,
-            attributes: [.font: RetroFont.body(12), .foregroundColor: theme.colors.textPrimary.withAlphaComponent(0.85)]
+            attributes: [.font: ChromeFont.label, .foregroundColor: theme.colors.textPrimary.withAlphaComponent(0.85)]
         ))
-        bodyView.selectedTextAttributes = [.backgroundColor: theme.colors.bgSelectedStrong]
+        bodyView.selectedTextAttributes = [.backgroundColor: theme.colors.textSelection]
         bodyScroll.isHidden = text.isEmpty
     }
 
     private func muted(_ text: String) -> NSAttributedString {
-        NSAttributedString(string: text, attributes: [.font: RetroFont.body(12), .foregroundColor: theme.colors.textMuted])
+        NSAttributedString(string: text, attributes: [.font: ChromeFont.label, .foregroundColor: theme.colors.textMuted])
     }
 
     private func signatureText(_ signature: Signature) -> NSAttributedString {
         let result = NSMutableAttributedString(
             string: signature.name,
-            attributes: [.font: RetroFont.body(12), .foregroundColor: theme.colors.textPrimary]
+            attributes: [.font: ChromeFont.label, .foregroundColor: theme.colors.textPrimary]
         )
         result.append(muted(" <\(signature.email)>"))
         return result
@@ -178,13 +199,18 @@ final class CommitInfoView: NSView {
         return "\(absolute) · \(relative)"
     }
 
+    /// The absolute date in tabular figures, then ` · 20h ago` muted.
     private func dateText(_ date: Date) -> NSAttributedString {
+        let font = ChromeFont.sans(size: 12, tabular: true)
         let result = NSMutableAttributedString(
             string: DateText.format(date, style: .absolute),
-            attributes: [.font: RetroFont.body(12), .foregroundColor: theme.colors.textPrimary]
+            attributes: [.font: font, .foregroundColor: theme.colors.textPrimary]
         )
         if let relative = Self.relativePhrase(date) {
-            result.append(muted(" · \(relative)"))
+            result.append(NSAttributedString(
+                string: " · \(relative)",
+                attributes: [.font: font, .foregroundColor: theme.colors.textMuted]
+            ))
         }
         return result
     }
@@ -204,7 +230,7 @@ final class CommitInfoView: NSView {
 
     private func label(_ title: String) -> NSTextField {
         let label = NSTextField(labelWithString: "")
-        label.setRetroText(title, color: theme.colors.textMuted)
+        label.setChromeText(title, font: ChromeFont.meta, color: theme.colors.textMuted)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.widthAnchor.constraint(equalToConstant: Self.labelWidth).isActive = true
         return label
@@ -214,9 +240,10 @@ final class CommitInfoView: NSView {
         let row = NSStackView(views: [label(title), value])
         row.orientation = .horizontal
         row.alignment = .firstBaseline
-        row.spacing = 6
+        row.spacing = 8
         metaStack.addArrangedSubview(row)
         row.widthAnchor.constraint(equalTo: metaStack.widthAnchor).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.metaRowHeight).isActive = true
     }
 
     private func addMeta(_ title: String, value: NSAttributedString, plain: String) {
@@ -271,7 +298,8 @@ final class CommitInfoView: NSView {
     }
 }
 
-/// A commit short id that selects the commit when clicked.
+/// A commit short id that selects the commit when clicked: SF Mono 12 ink
+/// with a 1 pt blue underline.
 final class CommitLinkButton: NSButton {
     let commitID: String
 
@@ -284,9 +312,10 @@ final class CommitLinkButton: NSButton {
         attributedTitle = NSAttributedString(
             string: String(commitID.prefix(7)),
             attributes: [
-                .font: RetroFont.body(12),
-                .foregroundColor: theme.colors.accent,
+                .font: ChromeFont.mono,
+                .foregroundColor: theme.colors.textPrimary,
                 .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: theme.colors.blue,
             ]
         )
         toolTip = "Select \(commitID)"

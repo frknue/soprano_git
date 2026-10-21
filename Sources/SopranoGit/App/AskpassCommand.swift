@@ -1,7 +1,7 @@
 import AppKit
 
 /// git and ssh call the app binary back for credentials (`GIT_ASKPASS`,
-/// `SSH_ASKPASS` with `SOPRANO_GIT_ASKPASS=1`): show a Mission Control prompt,
+/// `SSH_ASKPASS` with `SOPRANO_GIT_ASKPASS=1`): show a themed prompt dialog,
 /// print the answer to stdout and exit 0, or exit 1 when cancelled.
 @MainActor
 enum AskpassCommand {
@@ -39,10 +39,10 @@ enum AskpassCommand {
     static func run(prompt: String) -> Never {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        _ = RetroFont.registerBundledFont()
         let settings = SettingsCenter.shared
         settings.start(createIfMissing: false, watching: false)
         ThemeCenter.shared.apply(setting: settings.settings.theme, watch: false)
+        app.appearance = ThemeCenter.shared.theme.appearance.nsAppearance
 
         Task { @MainActor in
             let cleaned = prompt.trimmingCharacters(in: .whitespacesAndNewlines)

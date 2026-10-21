@@ -39,10 +39,8 @@ resource_bundle="$build_dir/SopranoGit_SopranoGit.bundle"
 info_plist="$repo_root/Support/Info.plist"
 app_icon="$repo_root/Sources/SopranoGit/Resources/AppIcon.icns"
 app_license="$repo_root/LICENSE"
-departure_mono_license="$repo_root/Support/Licenses/LICENSE-departure-mono"
 
-for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" \
-    "$app_license" "$departure_mono_license"; do
+for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" "$app_license"; do
     if [[ ! -e "$required_path" ]]; then
         echo "Missing packaging input: $required_path" >&2
         exit 1
@@ -64,7 +62,6 @@ cp "$binary_path" "$staged_app/Contents/MacOS/SopranoGit"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
 cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
 cp "$app_license" "$staged_app/Contents/Resources/LICENSE"
-cp "$departure_mono_license" "$staged_app/Contents/Resources/LICENSE-departure-mono"
 cp -R "$resource_bundle" "$staged_app/Contents/Resources/SopranoGit_SopranoGit.bundle"
 
 # One Info.plist serves every flavour; the caller picks the identity of this build.

@@ -74,15 +74,19 @@ final class SettingsViewController: NSViewController, FocusRegionController {
     private let sidebar = NSView()
     private let pageStack = NSStackView()
     private var pageButtons: [SettingsPage: SettingsPageButton] = [:]
-    private let sidebarRule = RetroRuleView(axis: .vertical, style: .single)
+    private let sidebarRule = ChromeRuleView(axis: .vertical)
     private let hintLabel = NSTextField(wrappingLabelWithString: "")
     private let scrollView = NSScrollView()
     private let documentView = FlippedView()
     private let contentStack = NSStackView()
 
-    private var filterField: RetroSearchField?
+    private var filterField: SearchField?
     private var shortcutList: NSStackView?
     private var extraPathInput: NSTextField?
+    /// The General page's theme popup while that page shows (tests).
+    private(set) weak var themePopup: NSPopUpButton?
+    /// The Keyboard page's rows by command id while that page shows (tests).
+    private(set) var shortcutRows: [String: ShortcutSettingRow] = [:]
 
     init(center: SettingsCenter = .shared, router: KeyboardRouter?) {
         self.center = center
@@ -114,8 +118,8 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         }
 
         pageStack.orientation = .vertical
-        pageStack.spacing = 4
-        pageStack.edgeInsets = NSEdgeInsets(top: 16, left: 10, bottom: 16, right: 10)
+        pageStack.spacing = 2
+        pageStack.edgeInsets = NSEdgeInsets(top: 12, left: 10, bottom: 12, right: 10)
         pageStack.translatesAutoresizingMaskIntoConstraints = false
         sidebar.addSubview(pageStack)
         for page in SettingsPage.allCases {
@@ -124,12 +128,12 @@ final class SettingsViewController: NSViewController, FocusRegionController {
             pageButtons[page] = button
             pageStack.addArrangedSubview(button)
             NSLayoutConstraint.activate([
-                button.heightAnchor.constraint(equalToConstant: 32),
+                button.heightAnchor.constraint(equalToConstant: SettingsPageButton.height),
                 button.widthAnchor.constraint(equalToConstant: 180),
             ])
         }
         sidebar.addSubview(sidebarRule)
-        hintLabel.font = RetroFont.body(11)
+        hintLabel.font = ChromeFont.meta
         hintLabel.maximumNumberOfLines = 0
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
         sidebar.addSubview(hintLabel)
@@ -162,7 +166,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
             pageStack.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
             pageStack.topAnchor.constraint(equalTo: sidebar.topAnchor),
 
-            hintLabel.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 22),
+            hintLabel.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor, constant: 20),
             hintLabel.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor, constant: -16),
             hintLabel.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor, constant: -16),
 
@@ -211,7 +215,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         let colors = theme.colors
         root.layer?.backgroundColor = colors.bgBase.cgColor
         sidebar.layer?.backgroundColor = colors.bgPanel.cgColor
-        sidebarRule.color = colors.borderStrong
+        sidebarRule.color = colors.borderSubtle
         hintLabel.textColor = colors.textMuted
         for (page, button) in pageButtons {
             button.apply(theme: theme)
@@ -285,6 +289,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         filterField = nil
         shortcutList = nil
         extraPathInput = nil
+        shortcutRows = [:]
 
         switch page {
         case .general: buildGeneral()
@@ -338,18 +343,28 @@ final class SettingsViewController: NSViewController, FocusRegionController {
 
     // MARK: General
 
+    /// The theme popup: follow Soprano, then every id settings.json accepts
+    /// (`AppTheme.options`: Folio, Folio Paper, Folio Ink, the 7 themes).
+    static let themeChoices: [(title: String, value: String)] =
+        [(title: "Follow Soprano", value: "soprano")]
+        + AppTheme.options.map { option in
+            (title: option.id == AppTheme.folioId ? "Folio (follows macOS)" : option.name, value: option.id)
+        }
+
     private func buildGeneral() {
         let settings = center.settings
         addHeader("General", "Appearance, graph and diff. Changes apply right away and are written to \(center.displayPath), keeping its comments.")
 
         let (appearance, appearanceRows) = form.card(title: "Appearance")
-        let themes = [(title: "Follow Soprano", value: "soprano")] + AppTheme.allThemes.map { (title: $0.name, value: $0.id) }
-        let themePopup = form.popup(themes, selected: settings.theme)
+        let themePopup = form.popup(Self.themeChoices, selected: settings.theme)
         themePopup.target = self
         themePopup.action = #selector(themeChanged(_:))
-        let themeDetail = settings.theme == "soprano"
-            ? "Uses Soprano's theme, now \(ThemeCenter.shared.theme.name), and follows it when it changes."
-            : "A fixed theme, independent of Soprano."
+        self.themePopup = themePopup
+        let themeDetail = switch settings.theme {
+        case "soprano": "Uses Soprano's theme and appearance, now \(ThemeCenter.shared.theme.name)."
+        case AppTheme.folioId: "Paper or Ink, following the macOS appearance."
+        default: "A fixed theme, independent of Soprano."
+        }
         form.add([form.row("Theme", detail: themeDetail, control: themePopup)], to: appearanceRows)
         add(appearance)
 
@@ -433,7 +448,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         addHeader("Git", "The git executable, the PATH its hooks see, and how Pull integrates. The executable and PATH apply to repositories opened after the change.")
 
         let (executable, executableRows) = form.card(title: "Executable")
-        let pathField = form.textField(rendered?.gitPath ?? "", placeholder: "Auto-detect", width: 260)
+        let pathField = form.textField(rendered?.gitPath ?? "", placeholder: "Auto-detect", width: 260, monospaced: true)
         pathField.target = self
         pathField.action = #selector(gitPathCommitted(_:))
         let resolved = GitRunner.resolveExecutable(preferredPath: settings.gitPath)
@@ -468,7 +483,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         } else {
             form.add(directories.enumerated().map { pathRow($0.element, index: $0.offset) }, to: extraRows)
         }
-        let input = form.textField("", placeholder: "Directory path", width: 260)
+        let input = form.textField("", placeholder: "Directory path", width: 260, monospaced: true)
         input.target = self
         input.action = #selector(addExtraPath)
         input.cell?.sendsActionOnEndEditing = false
@@ -476,7 +491,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         form.add([form.row("Add directory", control: form.group([
             input,
             form.button("Browse…", target: self, action: #selector(browseExtraPath)),
-            form.button("Add", kind: .prominent, target: self, action: #selector(addExtraPath)),
+            form.button("Add", kind: .ink, target: self, action: #selector(addExtraPath)),
         ]))], to: extraRows)
         add(extra)
 
@@ -504,7 +519,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
     private func pathRow(_ path: String?, index: Int) -> NSView {
         guard let path else {
             let row = NSTextField(labelWithString: "No extra directories.")
-            row.font = RetroFont.body(11)
+            row.font = ChromeFont.meta
             row.textColor = theme.colors.textMuted
             let container = NSView()
             container.translatesAutoresizingMaskIntoConstraints = false
@@ -522,7 +537,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         let remove = form.button("Remove", target: self, action: #selector(removeExtraPath(_:)))
         remove.tag = index
         let label = NSTextField(labelWithString: exists ? path : "\(path)  ·  not found")
-        label.font = RetroFont.body(12)
+        label.font = ChromeFont.mono
         label.textColor = exists ? theme.colors.textPrimary : theme.colors.textMuted
         label.lineBreakMode = .byTruncatingMiddle
         let row = NSView()
@@ -644,7 +659,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         ], to: prefixRows)
         add(prefix)
 
-        let filter = RetroSearchField(placeholder: "Filter shortcuts by name, id or key", theme: theme, hint: "/")
+        let filter = SearchField(placeholder: "Filter shortcuts by name, id or key", theme: theme, hint: "/")
         filter.field.stringValue = shortcutQuery
         filter.field.delegate = self
         filter.translatesAutoresizingMaskIntoConstraints = false
@@ -682,14 +697,14 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         let sections = ShortcutSheetModel.sections(registry: center.registry, settings: center, query: shortcutQuery)
         if sections.isEmpty {
             let empty = NSTextField(labelWithString: "")
-            empty.setRetroText("No matching commands", color: theme.colors.textMuted)
+            empty.setChromeText("No matching commands", font: ChromeFont.empty, color: theme.colors.textMuted)
             list.addArrangedSubview(empty)
             return
         }
         for section in sections {
             let (card, rows) = form.card(title: section.category.rawValue)
             let views = section.entries.map { entry in
-                ShortcutSettingRow(
+                let row = ShortcutSettingRow(
                     entry: entry,
                     scopes: center.registry.command(entry.id)?.scopes ?? [],
                     isCustomized: keymap.customizedIDs.contains(entry.id),
@@ -699,6 +714,8 @@ final class SettingsViewController: NSViewController, FocusRegionController {
                     theme: theme,
                     target: self
                 )
+                shortcutRows[entry.id] = row
+                return row
             }
             form.add(views, to: rows)
             list.addArrangedSubview(card)
@@ -797,7 +814,7 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         let (about, rows) = form.card(title: "Soprano Git")
         let git = GitRunner.resolveExecutable(preferredPath: center.settings.gitPath).map { abbreviated($0.path) } ?? "not found"
         form.add([
-            form.row("Version", control: value(AppVersion.current)),
+            form.row("Version", control: value(AppVersion.current, font: ChromeFont.sans(size: 12, tabular: true))),
             form.row("Git", control: value(git)),
             form.row("Settings", control: value(center.displayPath)),
             form.row("Soprano theme source", control: value(SettingsFile.displayPath(for: ThemeCenter.shared.sopranoSettingsURL))),
@@ -806,9 +823,10 @@ final class SettingsViewController: NSViewController, FocusRegionController {
         add(about)
     }
 
-    private func value(_ text: String) -> NSTextField {
+    /// A read-only value: SF Mono 12 (paths) unless `font` says otherwise.
+    private func value(_ text: String, font: NSFont = ChromeFont.mono) -> NSTextField {
         let label = NSTextField(labelWithString: text)
-        label.font = RetroFont.body(12)
+        label.font = font
         label.textColor = theme.colors.textMuted
         label.lineBreakMode = .byTruncatingMiddle
         label.isSelectable = true
@@ -890,10 +908,14 @@ final class SettingsRootView: NSView {
     override var acceptsFirstResponder: Bool { true }
 }
 
-/// One command on the Keyboard page: title, id and scope, its chords as
-/// keycaps (or the recording prompt), and Record / Off / Reset.
+/// One command on the Keyboard page: SF Pro 12 title over its SF Mono 11
+/// `id · scope`, one K1 keycap group per chord (accent when customized) or
+/// the recording prompt, and Record / Off / Reset.
 @MainActor
-private final class ShortcutSettingRow: NSView {
+final class ShortcutSettingRow: NSView {
+    /// One group per chord, in order (tests).
+    private(set) var keycapGroups: [ChromeKeycapGroupView] = []
+
     init(
         entry: ShortcutEntry,
         scopes: Set<FocusRegion>,
@@ -908,15 +930,13 @@ private final class ShortcutSettingRow: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         let colors = theme.colors
 
-        let title = NSTextField(labelWithString: entry.title)
-        title.font = RetroFont.body(12)
-        title.textColor = isDisabled ? colors.textMuted : colors.textPrimary
+        let title = NSTextField(labelWithString: "")
         title.lineBreakMode = .byTruncatingTail
+        title.setChromeText(entry.title, font: ChromeFont.label, color: isDisabled ? colors.textMuted : colors.textPrimary)
         let scopeText = scopes.isEmpty ? "everywhere" : scopes.map(\.rawValue).sorted().joined(separator: ", ")
-        let subtitle = NSTextField(labelWithString: "\(entry.id) · \(scopeText)")
-        subtitle.font = RetroFont.body(10)
-        subtitle.textColor = colors.textMuted
+        let subtitle = NSTextField(labelWithString: "")
         subtitle.lineBreakMode = .byTruncatingTail
+        subtitle.setChromeText("\(entry.id) · \(scopeText)", font: ChromeFont.monoSmall, color: colors.textMuted)
         let text = NSStackView(views: [title, subtitle])
         text.orientation = .vertical
         text.alignment = .leading
@@ -928,27 +948,32 @@ private final class ShortcutSettingRow: NSView {
         let keys = NSStackView()
         keys.orientation = .horizontal
         keys.alignment = .centerY
-        keys.spacing = 4
+        keys.spacing = 6
         if let recording {
             let prompt = NSTextField(labelWithString: "")
-            prompt.setRetroText(recording, color: colors.accent, glow: true)
+            prompt.setChromeText(recording, font: ChromeFont.sans(size: 11, weight: .semibold), color: colors.accent)
             keys.addArrangedSubview(prompt)
         } else if entry.keys.isEmpty {
             let none = NSTextField(labelWithString: "")
-            none.setRetroText(isDisabled ? "off" : "unbound", color: colors.textMuted)
+            none.setChromeText(isDisabled ? "off" : "unbound", font: ChromeFont.meta, color: colors.textMuted)
             keys.addArrangedSubview(none)
         } else {
-            for key in entry.keys {
-                let cap = KeycapView(text: key, theme: theme)
-                cap.isLit = isCustomized
-                keys.addArrangedSubview(cap)
+            for caps in entry.keys {
+                let group = ChromeKeycapGroupView(caps: caps, theme: theme, tone: isCustomized ? .accent : .primary)
+                keycapGroups.append(group)
+                keys.addArrangedSubview(group)
             }
         }
         if let conflict {
-            let mark = NSTextField(labelWithString: "")
-            mark.setRetroText("conflict", color: colors.yellow)
-            mark.toolTip = conflict
-            keys.insertArrangedSubview(mark, at: 0)
+            let mark = ChromeStatusMark(shape: .dot, color: colors.yellow, size: Chrome.statusMarkSmall)
+            let label = NSTextField(labelWithString: "")
+            label.setChromeText("conflict", font: ChromeFont.meta, color: colors.yellow)
+            let flag = NSStackView(views: [mark, label])
+            flag.orientation = .horizontal
+            flag.alignment = .centerY
+            flag.spacing = 5
+            flag.toolTip = conflict
+            keys.insertArrangedSubview(flag, at: 0)
         }
         keys.setContentHuggingPriority(.required, for: .horizontal)
         keys.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -957,14 +982,20 @@ private final class ShortcutSettingRow: NSView {
         let buttons = NSStackView()
         buttons.orientation = .horizontal
         buttons.spacing = 4
-        let record = RetroButton(title: recording == nil ? "Record" : "Cancel", theme: theme, kind: recording == nil ? .standard : .prominent, target: target, action: #selector(SettingsViewController.recordClicked(_:)))
+        let record = ChromeButton(
+            title: recording == nil ? "Record" : "Cancel",
+            theme: theme,
+            kind: recording == nil ? .standard : .ink,
+            target: target,
+            action: #selector(SettingsViewController.recordClicked(_:))
+        )
         record.identifier = NSUserInterfaceItemIdentifier(entry.id)
         buttons.addArrangedSubview(record)
-        let off = RetroButton(title: "Off", theme: theme, target: target, action: #selector(SettingsViewController.disableClicked(_:)))
+        let off = ChromeButton(title: "Off", theme: theme, target: target, action: #selector(SettingsViewController.disableClicked(_:)))
         off.identifier = NSUserInterfaceItemIdentifier(entry.id)
         off.isEnabled = !entry.keys.isEmpty
         buttons.addArrangedSubview(off)
-        let reset = RetroButton(title: "Reset", theme: theme, target: target, action: #selector(SettingsViewController.resetClicked(_:)))
+        let reset = ChromeButton(title: "Reset", theme: theme, target: target, action: #selector(SettingsViewController.resetClicked(_:)))
         reset.identifier = NSUserInterfaceItemIdentifier(entry.id)
         reset.isEnabled = isCustomized
         buttons.addArrangedSubview(reset)
@@ -975,7 +1006,7 @@ private final class ShortcutSettingRow: NSView {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 42),
+            heightAnchor.constraint(equalToConstant: 44),
             text.leadingAnchor.constraint(equalTo: leadingAnchor),
             text.centerYAnchor.constraint(equalTo: centerYAnchor),
             text.trailingAnchor.constraint(lessThanOrEqualTo: keys.leadingAnchor, constant: -12),

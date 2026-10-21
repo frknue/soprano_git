@@ -79,13 +79,19 @@ struct DiffSplitLayoutTests {
         let lines = try #require(document.file?.hunks.first?.lines)
         let style = DiffRowStyle(theme: ThemeCenter.shared.theme, maxLineNumber: 99)
         let cell = DiffSplitLineCellView()
-        cell.configure(old: lines[2], oldTokens: nil, new: lines[2], newTokens: nil, style: style, isCurrentHunk: false)
+        cell.configure(
+            old: lines[2], oldTokens: nil, oldEmphasis: nil, new: lines[2], newTokens: nil, newEmphasis: nil,
+            style: style, isCurrentChange: false
+        )
         #expect(cell.old.number?.string == "12")
         #expect(cell.new.number?.string == "13")
         #expect(cell.old.text?.string == "after")
         #expect(cell.new.text?.string == "after")
 
-        cell.configure(old: lines[1], oldTokens: nil, new: nil, newTokens: nil, style: style, isCurrentHunk: false)
+        cell.configure(
+            old: lines[1], oldTokens: nil, oldEmphasis: nil, new: nil, newTokens: nil, newEmphasis: nil,
+            style: style, isCurrentChange: false
+        )
         #expect(cell.old.number?.string == "11")
         #expect(cell.new.line == nil)
     }

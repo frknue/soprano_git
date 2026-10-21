@@ -201,6 +201,38 @@ struct RefSidebarTests {
         #expect(h.sidebar.selectedNode?.id == h.sidebar.visibleRowIDs.last)
     }
 
+    @Test func theHeadBranchShowsAnInkCheckmarkAndSectionsCarryTheirTopMargin() async throws {
+        let h = try await makeHarness()
+        defer { cleanUp(h) }
+        let outline = h.sidebar.outlineView
+        func cell(_ id: String) throws -> SidebarCellView {
+            let row = try #require(h.sidebar.row(forID: id))
+            let item = try #require(outline.item(atRow: row))
+            return try #require(outline.delegate?.outlineView?(outline, viewFor: outline.outlineTableColumn, item: item) as? SidebarCellView)
+        }
+        let head = try cell("ref:refs/heads/main")
+        let section = try cell("section:local")
+
+        #expect(head.iconName == "checkmark")
+        let headFont = head.textField?.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        let traits = headFont?.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        let weight = traits?[.weight] as? CGFloat ?? 0
+        #expect(weight >= NSFont.Weight.semibold.rawValue - 0.01, "HEAD title is Semibold")
+        #expect(section.titleText == "LOCAL", "sections are eyebrows")
+        #expect(section.iconName == nil)
+        #expect(section.isExpanded)
+
+        let localRow = try #require(h.sidebar.row(forID: "section:local"))
+        let tagsRow = try #require(h.sidebar.row(forID: "section:tags"))
+        let mainRow = try #require(h.sidebar.row(forID: "ref:refs/heads/main"))
+        #expect(outline.rect(ofRow: localRow).height == RefSidebarViewController.rowHeight + 2)
+        #expect(outline.rect(ofRow: tagsRow).height == RefSidebarViewController.rowHeight + 8)
+        #expect(outline.rect(ofRow: mainRow).height == RefSidebarViewController.rowHeight)
+        #expect(SidebarCellView.indent(level: 0) == 8)
+        #expect(SidebarCellView.indent(level: 1) == 12)
+        #expect(SidebarCellView.indent(level: 2) == 30)
+    }
+
     @Test func sidebarCommandsMatchTheBindingTable() {
         let commands = SidebarCommands.all
         #expect(commands.map(\.id) == ["sidebar.filter", "sidebar.focusFilter", "sidebar.next", "sidebar.previous", "sidebar.activate", "sidebar.toggle"])

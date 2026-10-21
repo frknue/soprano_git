@@ -123,11 +123,16 @@ struct SidebarTreeTests {
     }
 
     @Test func trackingTextShowsAheadBehindOrGone() {
-        let colors = AppTheme.theme(for: "mission-control").colors
+        let colors = AppTheme.theme(for: "folio-paper", appearance: .light).colors
         #expect(SidebarCellView.trackingText(for: local("a", ahead: 2, behind: 1), colors: colors).string == "↑2 ↓1")
         #expect(SidebarCellView.trackingText(for: local("a", behind: 3), colors: colors).string == "↓3")
         #expect(SidebarCellView.trackingText(for: local("a", ahead: 2, gone: true), colors: colors).string == "gone")
         #expect(SidebarCellView.trackingText(for: local("a"), colors: colors).string.isEmpty)
+        let tracking = SidebarCellView.trackingText(for: local("a", ahead: 2, behind: 1), colors: colors)
+        #expect(tracking.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == colors.textMuted)
+        #expect(tracking.attribute(.foregroundColor, at: tracking.length - 1, effectiveRange: nil) as? NSColor == colors.yellow)
+        let gone = SidebarCellView.trackingText(for: local("a", gone: true), colors: colors)
+        #expect(gone.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == colors.textMuted)
     }
 
     @Test func expansionPersistsPerRepositoryWithSectionsOpenAndFoldersClosedByDefault() {

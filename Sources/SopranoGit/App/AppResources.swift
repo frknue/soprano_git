@@ -1,9 +1,8 @@
 import Foundation
 
-/// Resource lookup for the vendored Soprano chrome (RetroChrome loads the
-/// Departure Mono face through `SopranoResources.bundle`). Kept under
-/// Soprano's name so the vendored files compile unchanged.
-enum SopranoResources {
+/// The SPM resource bundle (`AppIcon.icns`), for the Dock icon fallback when
+/// the app runs outside a packaged `.app`.
+enum AppResources {
     static let bundleName = "SopranoGit_SopranoGit.bundle"
 
     /// The SPM resource bundle inside the packaged app, else `Bundle.module`

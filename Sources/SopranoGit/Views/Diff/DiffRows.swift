@@ -3,12 +3,17 @@ import SopranoGitCore
 
 /// Fonts, colors and gutter metrics every diff row draws with; rebuilt when
 /// the theme or the file changes so rows never build attributes per draw.
+/// Code is SF Mono 12 on an 18 pt line, line numbers SF Mono 11 muted.
 @MainActor
 struct DiffRowStyle {
     let colors: ThemeColors
     let textAttributes: [NSAttributedString.Key: Any]
     let mutedAttributes: [NSAttributedString.Key: Any]
     let numberAttributes: [NSAttributedString.Key: Any]
+    /// Keyword and heading tokens.
+    let semiboldFont: NSFont
+    /// Comment tokens.
+    let italicFont: NSFont
     let addedMarker: NSAttributedString
     let removedMarker: NSAttributedString
     /// Width of one line-number column.
@@ -16,8 +21,12 @@ struct DiffRowStyle {
     /// Advance of one character of the (monospaced) code font.
     let columnWidth: CGFloat
     let markerWidth: CGFloat = 16
-    static let rail: CGFloat = 3
-    static let padding: CGFloat = 8
+    /// Narrowest line-number column (`.gutter` in the mock).
+    static let minimumNumberWidth: CGFloat = 44
+    /// Space between a line number and its column's right edge.
+    static let numberPadding: CGFloat = 8
+    /// Space after the code text.
+    static let codePadding: CGFloat = 8
     /// Where the text sits vertically inside an 18 pt line row.
     static let textTop: CGFloat = 2
     /// Lines longer than this are cut before drawing (the row truncates them anyway).
@@ -25,31 +34,32 @@ struct DiffRowStyle {
 
     init(theme: AppTheme, maxLineNumber: Int) {
         colors = theme.colors
-        let body = RetroFont.body(12)
-        let small = RetroFont.body(11)
+        let code = ChromeFont.mono
+        let small = ChromeFont.monoSmall
+        semiboldFont = ChromeFont.monospaced(size: code.pointSize, weight: .semibold)
+        italicFont = NSFont(descriptor: code.fontDescriptor.withSymbolicTraits(.italic), size: code.pointSize) ?? code
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        textAttributes = [.font: body, .foregroundColor: colors.textPrimary, .paragraphStyle: paragraph]
-        mutedAttributes = [.font: body, .foregroundColor: colors.textMuted, .paragraphStyle: paragraph]
-        numberAttributes = [.font: small, .foregroundColor: colors.textMuted.withAlphaComponent(0.75)]
-        addedMarker = NSAttributedString(string: "+", attributes: [.font: body, .foregroundColor: colors.success])
-        removedMarker = NSAttributedString(string: "−", attributes: [.font: body, .foregroundColor: colors.danger])
+        textAttributes = [.font: code, .foregroundColor: colors.syntaxPlain, .paragraphStyle: paragraph]
+        mutedAttributes = [.font: code, .foregroundColor: colors.textMuted, .paragraphStyle: paragraph]
+        numberAttributes = [.font: small, .foregroundColor: colors.textMuted]
+        addedMarker = NSAttributedString(string: "+", attributes: [.font: semiboldFont, .foregroundColor: colors.success])
+        removedMarker = NSAttributedString(string: "−", attributes: [.font: semiboldFont, .foregroundColor: colors.danger])
         let digits = max(3, String(max(1, maxLineNumber)).count)
         let digitWidth = NSAttributedString(string: "0", attributes: [.font: small]).size().width
-        numberWidth = ceil(CGFloat(digits) * digitWidth) + 12
-        columnWidth = NSAttributedString(string: "0", attributes: [.font: body]).size().width
+        numberWidth = max(Self.minimumNumberWidth, ceil(CGFloat(digits) * digitWidth) + Self.numberPadding * 2)
+        columnWidth = NSAttributedString(string: "0", attributes: [.font: code]).size().width
     }
 
     /// Unified layout: where the two-number gutter ends and the code starts.
-    var gutterWidth: CGFloat { Self.rail + numberWidth * 2 }
-    var textX: CGFloat { textSpan(from: 0, to: 0, gutter: gutterWidth).minX }
+    var gutterWidth: CGFloat { numberWidth * 2 }
     /// Split layout: each side's one-number gutter.
-    var sideGutterWidth: CGFloat { Self.rail + numberWidth }
+    var sideGutterWidth: CGFloat { numberWidth }
 
     /// Where code text goes in a unified row, or a split side, spanning
     /// `minX..<maxX` with a `gutter`: past the gutter and the +/− marker.
     func textSpan(from minX: CGFloat, to maxX: CGFloat, gutter: CGFloat) -> (minX: CGFloat, maxX: CGFloat) {
-        (minX + gutter + markerWidth, maxX - 4)
+        (minX + gutter + markerWidth, maxX - Self.codePadding)
     }
 
     /// Horizontal scrolling of the code text in rows `rowWidth` wide: `limit`
@@ -91,9 +101,15 @@ struct DiffRowStyle {
         }
     }
 
-    /// The line's text in `textPrimary`, colored by its syntax tokens (ranges
-    /// relative to the raw line), tabs shown as four spaces.
-    func text(of line: DiffLine, tokens: [SyntaxToken]?) -> NSAttributedString {
+    /// Where a marker starts inside its column: centred (all markers are one
+    /// monospaced column wide).
+    var markerInset: CGFloat { floor((markerWidth - columnWidth) / 2) }
+
+    /// The line's text in `syntaxPlain`, colored and weighted by its syntax
+    /// tokens, with the changed words of a paired line (`emphasis`, a UTF-16
+    /// range of the raw line from `DiffDocument.changedRange`) on a
+    /// `diffAddWord` / `diffDeleteWord` background; tabs shown as four spaces.
+    func text(of line: DiffLine, tokens: [SyntaxToken]?, emphasis: NSRange?) -> NSAttributedString {
         if line.kind == .noNewlineMarker {
             return NSAttributedString(string: DiffDocument.noNewlineText, attributes: mutedAttributes)
         }
@@ -104,6 +120,17 @@ struct DiffRowStyle {
         for token in tokens ?? [] where token.range.location < length {
             let range = NSRange(location: token.range.location, length: min(token.range.length, length - token.range.location))
             text.addAttribute(.foregroundColor, value: token.kind.color(in: colors), range: range)
+            // The vendored kind faces (`isEmphasized`, `isItalic`), with the
+            // fonts cached in the style so drawing a row allocates none.
+            if token.kind.isEmphasized {
+                text.addAttribute(.font, value: semiboldFont, range: range)
+            } else if token.kind.isItalic {
+                text.addAttribute(.font, value: italicFont, range: range)
+            }
+        }
+        if let emphasis, emphasis.location < length, let background = emphasisColor(for: line.kind) {
+            let range = NSRange(location: emphasis.location, length: min(emphasis.length, length - emphasis.location))
+            text.addAttribute(.backgroundColor, value: background, range: range)
         }
         if cut.contains("\t") {
             // Each replacement takes the attributes of the tab it replaces.
@@ -112,11 +139,20 @@ struct DiffRowStyle {
         return text
     }
 
-    /// Added and removed lines are tinted `success`/`danger` α0.14.
+    /// Changed words: `diffAddWord` on added lines, `diffDeleteWord` on removed ones.
+    func emphasisColor(for kind: DiffLine.Kind) -> NSColor? {
+        switch kind {
+        case .added: colors.diffAddWord
+        case .removed: colors.diffDeleteWord
+        case .context, .noNewlineMarker: nil
+        }
+    }
+
+    /// Added and removed lines are tinted `diffAdd` / `diffDelete`.
     func tint(for kind: DiffLine.Kind) -> NSColor? {
         switch kind {
-        case .added: colors.success.withAlphaComponent(0.14)
-        case .removed: colors.danger.withAlphaComponent(0.14)
+        case .added: colors.diffAdd
+        case .removed: colors.diffDelete
         case .context, .noNewlineMarker: nil
         }
     }
@@ -125,11 +161,11 @@ struct DiffRowStyle {
 /// Drawing shared by the unified and split line rows.
 @MainActor
 enum DiffRowDrawing {
-    /// A line number right-aligned at `right`.
+    /// A line number right-aligned in the column ending at `right`.
     static func draw(number: NSAttributedString?, right: CGFloat, height: CGFloat) {
         guard let number else { return }
         let size = number.size()
-        number.draw(at: NSPoint(x: right - 6 - size.width, y: floor((height - size.height) / 2)))
+        number.draw(at: NSPoint(x: right - DiffRowStyle.numberPadding - size.width, y: floor((height - size.height) / 2)))
     }
 
     /// Code text from `x` to `maxX`, scrolled left by `offset` (clipped at
@@ -150,54 +186,40 @@ enum DiffRowDrawing {
         }
     }
 
-    /// The faint raised gutter band ending in a hairline.
+    /// One line-number column: `bgPanel` ending in a `borderSubtle` hairline.
     static func drawGutter(from x: CGFloat, width: CGFloat, height: CGFloat, colors: ThemeColors) {
-        colors.bgRaised.withAlphaComponent(0.45).setFill()
-        NSRect(x: x, y: 0, width: width, height: height).fill(using: .sourceOver)
+        colors.bgPanel.setFill()
+        NSRect(x: x, y: 0, width: width, height: height).fill()
         colors.borderSubtle.setFill()
-        NSRect(x: x + width - 1, y: 0, width: 1, height: height).fill()
+        NSRect(x: x + width - Chrome.hairline, y: 0, width: Chrome.hairline, height: height).fill()
     }
 
-    /// Soprano's diff filler: `textMuted` α0.06 with thin diagonal stripes in
-    /// `borderSubtle`, phased by the row's position in the list (`originY`)
-    /// so stacked filler cells join into one hatched block.
-    static func drawFiller(in rect: NSRect, originY: CGFloat, colors: ThemeColors) {
-        colors.textMuted.withAlphaComponent(0.06).setFill()
+    /// The side of a split row without a line: a flat `diffFiller` wash.
+    static func drawFiller(in rect: NSRect, colors: ThemeColors) {
+        colors.diffFiller.setFill()
         rect.fill(using: .sourceOver)
-        let spacing: CGFloat = 8
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(rect: rect).addClip()
-        let path = NSBezierPath()
-        path.lineWidth = 1
-        var step = floor((rect.minX - rect.maxY - originY) / spacing)
-        let lastStep = ceil((rect.maxX - rect.minY - originY) / spacing)
-        while step <= lastStep {
-            let offset = step * spacing + originY
-            path.move(to: NSPoint(x: offset + rect.minY, y: rect.minY))
-            path.line(to: NSPoint(x: offset + rect.maxY, y: rect.maxY))
-            step += 1
-        }
-        colors.borderSubtle.setStroke()
-        path.stroke()
-        NSGraphicsContext.restoreGraphicsState()
     }
-}
 
-/// A diff list row (hunk header, line or notice). Rows of the current hunk
-/// draw an accent rail on their leading edge.
-@MainActor
-protocol DiffRowCell: NSView {
-    var isCurrentHunk: Bool { get set }
+    /// The current hunk's 2×14 pencil tick, `x` from the row's left edge.
+    static func drawTick(x: CGFloat, height: CGFloat, colors: ThemeColors) {
+        let tick = NSRect(
+            x: x, y: floor((height - Chrome.tickHeight) / 2), width: Chrome.tickWidth, height: Chrome.tickHeight
+        )
+        colors.pencilTick.setFill()
+        NSBezierPath(roundedRect: tick, xRadius: 1, yRadius: 1).fill()
+    }
 }
 
 /// A unified or split line row. Its code text is scrolled left by
 /// `textOffset` (the diff's horizontal scroll); gutters and markers stay put.
+/// The first changed row of the current hunk carries the pencil tick.
 @MainActor
-protocol DiffLineRowCell: DiffRowCell {
+protocol DiffLineRowCell: NSView {
     var textOffset: CGFloat { get set }
+    var isCurrentChange: Bool { get set }
 }
 
-/// One unified diff line: old/new line-number gutters, +/− marker, text;
+/// One unified diff line: old/new line-number columns, +/− marker, text;
 /// added and removed lines tinted. Drawn directly for speed; `configure`
 /// builds the row's attributed strings once.
 final class DiffLineCellView: NSView, DiffLineRowCell {
@@ -208,14 +230,17 @@ final class DiffLineCellView: NSView, DiffLineRowCell {
     private var style: DiffRowStyle?
     private var oldNumber: NSAttributedString?
     private var newNumber: NSAttributedString?
-    /// The drawn text, syntax colors applied.
+    /// The drawn text, syntax colors and word emphasis applied.
     private(set) var text = NSAttributedString()
-    var isCurrentHunk = false {
-        didSet { if oldValue != isCurrentHunk { needsDisplay = true } }
+    var isCurrentChange = false {
+        didSet { if oldValue != isCurrentChange { needsDisplay = true } }
     }
     var textOffset: CGFloat = 0 {
         didSet { if oldValue != textOffset { needsDisplay = true } }
     }
+
+    /// Where the pencil tick is drawn; nil when the row has none.
+    var tickX: CGFloat? { isCurrentChange ? Chrome.tickInset : nil }
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -228,13 +253,13 @@ final class DiffLineCellView: NSView, DiffLineRowCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(line: DiffLine, tokens: [SyntaxToken]?, style: DiffRowStyle, isCurrentHunk: Bool) {
+    func configure(line: DiffLine, tokens: [SyntaxToken]?, emphasis: NSRange?, style: DiffRowStyle, isCurrentChange: Bool) {
         self.line = line
         self.style = style
         oldNumber = style.number(line.oldNumber)
         newNumber = style.number(line.newNumber)
-        text = style.text(of: line, tokens: tokens)
-        self.isCurrentHunk = isCurrentHunk
+        text = style.text(of: line, tokens: tokens, emphasis: emphasis)
+        self.isCurrentChange = isCurrentChange
         needsDisplay = true
     }
 
@@ -246,22 +271,22 @@ final class DiffLineCellView: NSView, DiffLineRowCell {
             tint.setFill()
             bounds.fill(using: .sourceOver)
         }
-        DiffRowDrawing.drawGutter(from: 0, width: style.gutterWidth, height: height, colors: colors)
-        if isCurrentHunk {
-            colors.accent.setFill()
-            NSRect(x: 0, y: 0, width: DiffRowStyle.rail, height: height).fill()
-        }
-        DiffRowDrawing.draw(number: oldNumber, right: DiffRowStyle.rail + style.numberWidth, height: height)
-        DiffRowDrawing.draw(number: newNumber, right: DiffRowStyle.rail + style.numberWidth * 2, height: height)
-        style.marker(for: line.kind)?.draw(at: NSPoint(x: style.gutterWidth + 4, y: DiffRowStyle.textTop))
+        DiffRowDrawing.drawGutter(from: 0, width: style.numberWidth, height: height, colors: colors)
+        DiffRowDrawing.drawGutter(from: style.numberWidth, width: style.numberWidth, height: height, colors: colors)
+        DiffRowDrawing.draw(number: oldNumber, right: style.numberWidth, height: height)
+        DiffRowDrawing.draw(number: newNumber, right: style.gutterWidth, height: height)
+        style.marker(for: line.kind)?.draw(at: NSPoint(x: style.gutterWidth + style.markerInset, y: DiffRowStyle.textTop))
         let span = style.textSpan(from: 0, to: bounds.width, gutter: style.gutterWidth)
         DiffRowDrawing.draw(text: text, x: span.minX, maxX: span.maxX, offset: textOffset, height: height)
+        if let tickX {
+            DiffRowDrawing.drawTick(x: tickX, height: height, colors: colors)
+        }
     }
 }
 
 /// One split diff row: the old line on the left, the new line on the right,
-/// each with its own line-number gutter, +/− marker, text and tint, divided
-/// by a `borderSubtle` hairline. A missing side is a hatched filler.
+/// each with its own line-number column, +/− marker, text and tint, divided
+/// by a `borderSubtle` hairline. A missing side is a flat filler.
 final class DiffSplitLineCellView: NSView, DiffLineRowCell {
     static let identifier = NSUserInterfaceItemIdentifier("DiffSplitLineCell")
     static let rowHeight = DiffLineCellView.rowHeight
@@ -276,8 +301,8 @@ final class DiffSplitLineCellView: NSView, DiffLineRowCell {
     private(set) var old = Side()
     private(set) var new = Side()
     private var style: DiffRowStyle?
-    var isCurrentHunk = false {
-        didSet { if oldValue != isCurrentHunk { needsDisplay = true } }
+    var isCurrentChange = false {
+        didSet { if oldValue != isCurrentChange { needsDisplay = true } }
     }
     var textOffset: CGFloat = 0 {
         didSet { if oldValue != textOffset { needsDisplay = true } }
@@ -294,12 +319,19 @@ final class DiffSplitLineCellView: NSView, DiffLineRowCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(old oldLine: DiffLine?, oldTokens: [SyntaxToken]?, new newLine: DiffLine?, newTokens: [SyntaxToken]?,
-                   style: DiffRowStyle, isCurrentHunk: Bool) {
+    func configure(old oldLine: DiffLine?, oldTokens: [SyntaxToken]?, oldEmphasis: NSRange?,
+                   new newLine: DiffLine?, newTokens: [SyntaxToken]?, newEmphasis: NSRange?,
+                   style: DiffRowStyle, isCurrentChange: Bool) {
         self.style = style
-        old = Side(line: oldLine, number: style.number(oldLine?.oldNumber), text: oldLine.map { style.text(of: $0, tokens: oldTokens) })
-        new = Side(line: newLine, number: style.number(newLine?.newNumber), text: newLine.map { style.text(of: $0, tokens: newTokens) })
-        self.isCurrentHunk = isCurrentHunk
+        old = Side(
+            line: oldLine, number: style.number(oldLine?.oldNumber),
+            text: oldLine.map { style.text(of: $0, tokens: oldTokens, emphasis: oldEmphasis) }
+        )
+        new = Side(
+            line: newLine, number: style.number(newLine?.newNumber),
+            text: newLine.map { style.text(of: $0, tokens: newTokens, emphasis: newEmphasis) }
+        )
+        self.isCurrentChange = isCurrentChange
         needsDisplay = true
     }
 
@@ -308,32 +340,35 @@ final class DiffSplitLineCellView: NSView, DiffLineRowCell {
 
     static func dividerX(rowWidth: CGFloat) -> CGFloat { floor(rowWidth / 2) }
 
+    /// Where the pencil tick is drawn: on the left side when it shows a
+    /// removed line, else on the right; nil when the row has none.
+    var tickX: CGFloat? {
+        guard isCurrentChange else { return nil }
+        return (old.line?.kind == .removed ? 0 : dividerX + 1) + Chrome.tickInset
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let style else { return }
         let colors = style.colors
         let height = bounds.height
         let divider = dividerX
-        // Position in the list, so filler hatching lines up across rows.
-        let originY = superview?.frame.minY ?? 0
-        draw(old, from: 0, to: divider, style: style, originY: originY)
-        draw(new, from: divider + 1, to: bounds.width, style: style, originY: originY)
+        draw(old, from: 0, to: divider, style: style)
+        draw(new, from: divider + 1, to: bounds.width, style: style)
         colors.borderSubtle.setFill()
-        NSRect(x: divider, y: 0, width: 1, height: height).fill()
-        if isCurrentHunk {
-            colors.accent.setFill()
-            NSRect(x: 0, y: 0, width: DiffRowStyle.rail, height: height).fill()
+        NSRect(x: divider, y: 0, width: Chrome.hairline, height: height).fill()
+        if let tickX {
+            DiffRowDrawing.drawTick(x: tickX, height: height, colors: colors)
         }
     }
 
-    private func draw(_ side: Side, from minX: CGFloat, to maxX: CGFloat, style: DiffRowStyle, originY: CGFloat) {
+    private func draw(_ side: Side, from minX: CGFloat, to maxX: CGFloat, style: DiffRowStyle) {
         let colors = style.colors
         let height = bounds.height
         let gutter = style.sideGutterWidth
         guard let line = side.line else {
             DiffRowDrawing.drawGutter(from: minX, width: gutter, height: height, colors: colors)
             DiffRowDrawing.drawFiller(
-                in: NSRect(x: minX + gutter, y: 0, width: max(0, maxX - minX - gutter), height: height),
-                originY: originY, colors: colors
+                in: NSRect(x: minX + gutter, y: 0, width: max(0, maxX - minX - gutter), height: height), colors: colors
             )
             return
         }
@@ -343,7 +378,7 @@ final class DiffSplitLineCellView: NSView, DiffLineRowCell {
         }
         DiffRowDrawing.drawGutter(from: minX, width: gutter, height: height, colors: colors)
         DiffRowDrawing.draw(number: side.number, right: minX + gutter, height: height)
-        style.marker(for: line.kind)?.draw(at: NSPoint(x: minX + gutter + 4, y: DiffRowStyle.textTop))
+        style.marker(for: line.kind)?.draw(at: NSPoint(x: minX + gutter + style.markerInset, y: DiffRowStyle.textTop))
         if let text = side.text {
             let span = style.textSpan(from: minX, to: maxX, gutter: gutter)
             DiffRowDrawing.draw(text: text, x: span.minX, maxX: span.maxX, offset: textOffset, height: height)
@@ -351,21 +386,19 @@ final class DiffSplitLineCellView: NSView, DiffLineRowCell {
     }
 }
 
-/// Hunk header strip: `@@ -a,b +c,d @@` muted with the section text, and the
-/// hunk's action keys (STAGE HUNK / DISCARD, or UNSTAGE HUNK).
-final class DiffHunkHeaderCellView: NSView, DiffRowCell {
+/// Hunk header strip (Folio `.diff-row.is-hunk`): `bgPanel` between two
+/// `borderSubtle` hairlines, `@@ -a,b +c,d @@` in cyan and the section text
+/// in ink (SF Mono 11), and the hunk's actions (Stage hunk / Discard, or
+/// Unstage hunk) with their keycaps.
+final class DiffHunkHeaderCellView: NSView {
     static let identifier = NSUserInterfaceItemIdentifier("DiffHunkHeaderCell")
-    static let rowHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 26
+    private static let padding = Chrome.Space.bar
 
     private let rangeLabel = NSTextField(labelWithString: "")
     private let actionStack = NSStackView()
     private var actions: [PanelRowAction] = []
     private var colors: ThemeColors?
-    private var leadingConstraint: NSLayoutConstraint!
-
-    var isCurrentHunk = false {
-        didSet { if oldValue != isCurrentHunk { needsDisplay = true } }
-    }
 
     var actionTitles: [String] { actions.map(\.title) }
 
@@ -385,12 +418,11 @@ final class DiffHunkHeaderCellView: NSView, DiffRowCell {
         actionStack.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(rangeLabel)
         addSubview(actionStack)
-        leadingConstraint = rangeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12)
         NSLayoutConstraint.activate([
-            leadingConstraint,
+            rangeLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding),
             rangeLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            actionStack.leadingAnchor.constraint(greaterThanOrEqualTo: rangeLabel.trailingAnchor, constant: 12),
-            actionStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            actionStack.leadingAnchor.constraint(greaterThanOrEqualTo: rangeLabel.trailingAnchor, constant: Self.padding),
+            actionStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.padding),
             actionStack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -398,18 +430,16 @@ final class DiffHunkHeaderCellView: NSView, DiffRowCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// `textInset`: where the range text starts (past the line gutter of the layout).
-    func configure(hunk: DiffHunk, actions: [PanelRowAction], style: DiffRowStyle, theme: AppTheme, textInset: CGFloat,
-                   isCurrentHunk: Bool) {
+    func configure(hunk: DiffHunk, actions: [PanelRowAction], style: DiffRowStyle, theme: AppTheme) {
         colors = style.colors
-        leadingConstraint.constant = textInset + 4
+        let font = ChromeFont.monoSmall
         let range = "@@ -\(hunk.oldStart),\(hunk.oldCount) +\(hunk.newStart),\(hunk.newCount) @@"
         let text = NSMutableAttributedString(string: range, attributes: [
-            .font: RetroFont.body(11), .foregroundColor: style.colors.cyan.withAlphaComponent(0.85),
+            .font: font, .foregroundColor: style.colors.cyan,
         ])
         if !hunk.section.isEmpty {
             text.append(NSAttributedString(string: "  " + hunk.section, attributes: [
-                .font: RetroFont.body(11), .foregroundColor: style.colors.textMuted,
+                .font: font, .foregroundColor: style.colors.textPrimary,
             ]))
         }
         let paragraph = NSMutableParagraphStyle()
@@ -422,13 +452,15 @@ final class DiffHunkHeaderCellView: NSView, DiffRowCell {
             view.removeFromSuperview()
         }
         for (index, action) in actions.enumerated() {
-            let button = KeyHintButton(title: action.title, hint: PanelText.keycap(action.commandID), theme: theme, kind: action.kind)
+            let button = KeyHintButton(
+                title: action.title, hint: SettingsCenter.shared.keycaps(for: action.commandID), theme: theme,
+                kind: action.kind
+            )
             button.tag = index
             button.target = self
             button.action = #selector(runAction(_:))
             actionStack.addArrangedSubview(button)
         }
-        self.isCurrentHunk = isCurrentHunk
         needsDisplay = true
     }
 
@@ -439,25 +471,20 @@ final class DiffHunkHeaderCellView: NSView, DiffRowCell {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let colors else { return }
-        colors.bgRaised.setFill()
+        colors.bgPanel.setFill()
         bounds.fill()
         colors.borderSubtle.setFill()
-        NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
-        NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
-        if isCurrentHunk {
-            colors.accent.setFill()
-            NSRect(x: 0, y: 0, width: DiffRowStyle.rail, height: bounds.height).fill()
-        }
+        NSRect(x: 0, y: 0, width: bounds.width, height: Chrome.hairline).fill()
+        NSRect(x: 0, y: bounds.height - Chrome.hairline, width: bounds.width, height: Chrome.hairline).fill()
     }
 }
 
-/// A muted one-line note inside the diff list (mode change, truncation).
-final class DiffNoticeCellView: NSView, DiffRowCell {
+/// A one-line note inside the diff list (mode change, truncation), in yellow.
+final class DiffNoticeCellView: NSView {
     static let identifier = NSUserInterfaceItemIdentifier("DiffNoticeCell")
     static let rowHeight: CGFloat = 28
 
     private let label = NSTextField(labelWithString: "")
-    var isCurrentHunk = false
 
     init() {
         super.init(frame: .zero)
@@ -466,8 +493,8 @@ final class DiffNoticeCellView: NSView, DiffRowCell {
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.bar),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Chrome.Space.bar),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -476,18 +503,19 @@ final class DiffNoticeCellView: NSView, DiffRowCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(text: String, style: DiffRowStyle) {
-        label.attributedStringValue = NSAttributedString(string: text, attributes: [
-            .font: RetroFont.body(11), .foregroundColor: style.colors.yellow,
-        ])
+        label.setChromeText(text, font: ChromeFont.label, color: style.colors.yellow)
     }
 }
 
-/// The strip above the diff: kind badge, path, `+a −d`, hunk position, the
-/// diff side (UNSTAGED / STAGED / commit), the layout toggle (`v` Unified /
-/// Split), and the Esc key that closes it. When the strip is narrow the file
-/// name is the last thing to go: first the hunk position hides, then the side
-/// chip, then the buttons drop their captions and keep only their keycaps,
-/// then the `+a −d` counts; the path truncates from the head throughout.
+/// The strip above the diff (Folio `.diff-head`): change letter, path (folder
+/// muted, name Semibold) and `+a −d`; then `Hunk 3 of 4`, Previous K / Next J,
+/// the side chip (commit SHA, stash, Unstaged / Staged), the Split | Inline
+/// control with its `V` cap, and Close esc. `bgBase` over a hairline, with the
+/// 2 pt focus rule while the diff holds focus. When the strip is narrow the
+/// file name is the last thing to go: first the hunk position hides, then the
+/// side chip, then the buttons and segments drop their captions and keep their
+/// icons and keycaps, then the `+a −d` counts; the path drops leading folders
+/// (`…/Views/`) throughout.
 final class DiffHeaderView: NSView {
     static let height: CGFloat = 32
 
@@ -502,22 +530,44 @@ final class DiffHeaderView: NSView {
         static func < (lhs: Compaction, rhs: Compaction) -> Bool { lhs.rawValue < rhs.rawValue }
     }
 
+    /// What the side chip names: a word (Unstaged, Staged) in SF Pro, or an
+    /// id (commit SHA, `stash@{0}`) in SF Mono.
+    enum Side: Equatable {
+        case word(String)
+        case identifier(String)
+
+        var text: String {
+            switch self {
+            case let .word(text), let .identifier(text): text
+            }
+        }
+    }
+
     private var theme: AppTheme
-    private let focusBar = NSView()
-    private let bottomRule = NSView()
+    private let bottomRule = ChromeRuleView(axis: .horizontal)
+    private let focusRule = ChromeRuleView(axis: .horizontal, thickness: Chrome.focusMarkWidth)
     private let badge: ChangeKindBadge
     private let pathLabel = NSTextField(labelWithString: "")
+    /// Measures path candidates the way `pathLabel` lays them out; never shown.
+    private let measuringLabel = NSTextField(labelWithString: "")
     private let countsLabel = NSTextField(labelWithString: "")
     private let positionLabel = NSTextField(labelWithString: "")
     private let sideLabel = NSTextField(labelWithString: "")
     private let sideChip = NSView()
     private let trailingStack = NSStackView()
+    /// Previous K: the previous hunk.
+    let previousButton: KeyHintButton
+    /// Next J: the next hunk.
+    let nextButton: KeyHintButton
+    /// Split | Inline, followed by the `diff.toggleLayout` cap.
+    let layoutControl: DiffLayoutControl
+    private let layoutKeycaps: ChromeKeycapGroupView
     let closeButton: KeyHintButton
-    /// Shows the current layout (Unified / Split) with the `diff.toggleLayout` key.
-    let layoutButton: KeyHintButton
-    private var side: (text: String, color: NSColor?) = ("", nil)
+    private var side = Side.word("")
     private var position = ""
     private var layout = DiffLayout.unified
+    private var path = ""
+    private var oldPath: String?
     /// The open file's name, kept readable as "…/name" for as long as possible.
     private var fileName = ""
     /// `+a −d`, shown unless the strip is at its narrowest.
@@ -525,28 +575,51 @@ final class DiffHeaderView: NSView {
     private(set) var compaction = Compaction.full
 
     var isFocused = false {
-        didSet { restyle() }
+        didSet { focusRule.isHidden = !isFocused }
     }
 
     private static let closeTitle = "Close"
-    private static let edgeInset: CGFloat = 10
-    private static let badgeInset: CGFloat = 14
+    private static let previousTitle = "Previous"
+    private static let nextTitle = "Next"
+    private static let leadingInset: CGFloat = 14
+    private static let trailingInset: CGFloat = 8
     private static let pathGap: CGFloat = 8
-    private static let countsGap: CGFloat = 10
+    /// The strip's 8 pt gap plus the diffstat's 4 pt margin.
+    private static let countsGap: CGFloat = 12
     private static let trailingGap: CGFloat = 12
-    private static let itemSpacing: CGFloat = 10
-    private static let buttonSpacing: CGFloat = 6
+    private static let itemSpacing: CGFloat = 8
+    /// After the hunk position (its 2 pt margin) and before the segments.
+    private static let nearSpacing: CGFloat = 10
+    /// Around the 8 pt separators: before the side chip and before Close.
+    private static let groupSpacing: CGFloat = 24
+    private static let chipPadding: CGFloat = 6
+    /// `.diff-head .btn-plain`: padding 0 6, 5 pt between icon, title and caps.
+    private static let buttonPadding: CGFloat = 6
+    private static let buttonGap: CGFloat = 5
 
     init(theme: AppTheme) {
         self.theme = theme
         badge = ChangeKindBadge(kind: .modified, theme: theme)
-        closeButton = KeyHintButton(title: Self.closeTitle, hint: nil, theme: theme)
-        layoutButton = KeyHintButton(title: DiffLayout.unified.title, hint: nil, theme: theme)
+        previousButton = KeyHintButton(
+            title: Self.previousTitle, hint: nil, theme: theme, kind: .text, height: Chrome.controlHeight
+        )
+        nextButton = KeyHintButton(title: Self.nextTitle, hint: nil, theme: theme, kind: .text, height: Chrome.controlHeight)
+        closeButton = KeyHintButton(title: Self.closeTitle, hint: nil, theme: theme, kind: .text, height: Chrome.controlHeight)
+        layoutControl = DiffLayoutControl(theme: theme)
+        layoutKeycaps = ChromeKeycapGroupView(caps: [], theme: theme, style: .small, tone: .muted)
         super.init(frame: .zero)
         wantsLayer = true
-        for view in [focusBar, bottomRule, sideChip] {
-            view.wantsLayer = true
+        for button in [previousButton, nextButton, closeButton] {
+            button.horizontalPadding = Self.buttonPadding
+            button.contentGap = Self.buttonGap
         }
+        previousButton.symbolName = "chevron.up"
+        nextButton.symbolName = "chevron.down"
+        previousButton.setAccessibilityLabel("Previous Hunk")
+        nextButton.setAccessibilityLabel("Next Hunk")
+        closeButton.setAccessibilityLabel("Close Diff")
+        sideChip.wantsLayer = true
+        sideChip.layer?.cornerRadius = Chrome.Radius.cap
         pathLabel.lineBreakMode = .byTruncatingHead
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         for label in [countsLabel, positionLabel] {
@@ -561,36 +634,37 @@ final class DiffHeaderView: NSView {
         trailingStack.detachesHiddenViews = true
         trailingStack.setHuggingPriority(.required, for: .horizontal)
         trailingStack.setContentCompressionResistancePriority(.required, for: .horizontal)
-        for view in [positionLabel, sideChip, layoutButton, closeButton] as [NSView] {
+        for view in [positionLabel, previousButton, nextButton, sideChip, layoutControl, layoutKeycaps, closeButton] as [NSView] {
             trailingStack.addArrangedSubview(view)
         }
-        trailingStack.setCustomSpacing(Self.buttonSpacing, after: layoutButton)
-        for view in [focusBar, bottomRule, badge, pathLabel, countsLabel, trailingStack] as [NSView] {
+        trailingStack.setCustomSpacing(Self.nearSpacing, after: positionLabel)
+        trailingStack.setCustomSpacing(Self.groupSpacing, after: nextButton)
+        trailingStack.setCustomSpacing(Self.nearSpacing, after: sideChip)
+        trailingStack.setCustomSpacing(Self.groupSpacing, after: layoutKeycaps)
+        for view in [badge, pathLabel, countsLabel, trailingStack, bottomRule, focusRule] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Self.height),
-            focusBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            focusBar.topAnchor.constraint(equalTo: topAnchor),
-            focusBar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            focusBar.widthAnchor.constraint(equalToConstant: PanelHeaderView.focusBarWidth),
             bottomRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             bottomRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             bottomRule.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bottomRule.heightAnchor.constraint(equalToConstant: 1),
-            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.badgeInset),
+            focusRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            focusRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            focusRule.bottomAnchor.constraint(equalTo: bottomAnchor),
+            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leadingInset),
             badge.centerYAnchor.constraint(equalTo: centerYAnchor),
             pathLabel.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: Self.pathGap),
             pathLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             countsLabel.leadingAnchor.constraint(equalTo: pathLabel.trailingAnchor, constant: Self.countsGap),
             countsLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             trailingStack.leadingAnchor.constraint(greaterThanOrEqualTo: countsLabel.trailingAnchor, constant: Self.trailingGap),
-            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.edgeInset),
+            trailingStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.trailingInset),
             trailingStack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            sideChip.heightAnchor.constraint(equalToConstant: 18),
-            sideLabel.leadingAnchor.constraint(equalTo: sideChip.leadingAnchor, constant: 6),
-            sideLabel.trailingAnchor.constraint(equalTo: sideChip.trailingAnchor, constant: -6),
+            sideChip.heightAnchor.constraint(equalToConstant: Chrome.chipHeight),
+            sideLabel.leadingAnchor.constraint(equalTo: sideChip.leadingAnchor, constant: Self.chipPadding),
+            sideLabel.trailingAnchor.constraint(equalTo: sideChip.trailingAnchor, constant: -Self.chipPadding),
             sideLabel.centerYAnchor.constraint(equalTo: sideChip.centerYAnchor),
         ])
         restyle()
@@ -599,16 +673,17 @@ final class DiffHeaderView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    var pathText: String { pathLabel.stringValue }
+    var pathText: String { path }
     var sideText: String { side.text }
     var positionText: String { position }
     var layoutText: String { layout.title }
     var isPositionShown: Bool { !positionLabel.isHidden }
     var isSideShown: Bool { !sideChip.isHidden }
+    var isFocusRuleShown: Bool { !focusRule.isHidden }
 
     func show(layout: DiffLayout) {
         self.layout = layout
-        layoutButton.setAccessibilityLabel("Toggle Split Diff (\(layout.title))")
+        layoutControl.layout = layout
         updateCompaction()
     }
 
@@ -618,11 +693,16 @@ final class DiffHeaderView: NSView {
     }
 
     /// Picks the least compaction that leaves room for "…/name"; the counts
-    /// only go once even "…name" (the bare file name) no longer fits.
+    /// only go once even "…name" (the bare file name) no longer fits. The
+    /// path then drops as many leading folders as the room needs.
     private func updateCompaction() {
-        // The label's own text insets come on top of the string width.
-        func width(_ text: String) -> CGFloat { ceil(PanelText.path(text, colors: theme.colors).size().width) + 6 }
+        // Measured as the path label lays it out: string plus the label's text insets.
+        func width(_ text: String) -> CGFloat {
+            measuringLabel.attributedStringValue = PanelText.path(text, colors: theme.colors)
+            return measuringLabel.intrinsicContentSize.width
+        }
         let withFolder = width("…/" + fileName)
+        let labelInsets = withFolder - ceil(measuringLabel.attributedStringValue.size().width)
         let bare = width("…" + fileName)
         var chosen = Compaction.withoutCounts
         for level in Compaction.allCases {
@@ -635,6 +715,10 @@ final class DiffHeaderView: NSView {
         }
         apply(chosen)
         compaction = chosen
+        let shown = PanelText.path(
+            path, oldPath: oldPath, colors: theme.colors, availableWidth: max(0, pathRoom - labelInsets)
+        )
+        if pathLabel.attributedStringValue != shown { pathLabel.attributedStringValue = shown }
     }
 
     /// Width left for the path once everything else in the strip has its size.
@@ -642,67 +726,263 @@ final class DiffHeaderView: NSView {
         let visible = trailingStack.arrangedSubviews.filter { !$0.isHidden }
         var trailing: CGFloat = 0
         for (index, view) in visible.enumerated() {
-            trailing += view === sideChip ? ceil(sideLabel.intrinsicContentSize.width) + 12 : view.intrinsicContentSize.width
+            trailing += width(of: view)
             if index < visible.count - 1 {
-                trailing += view === layoutButton ? Self.buttonSpacing : Self.itemSpacing
+                let custom = trailingStack.customSpacing(after: view)
+                trailing += custom == NSStackView.useDefaultSpacing ? trailingStack.spacing : custom
             }
         }
-        let leading = Self.badgeInset + badge.intrinsicContentSize.width + Self.pathGap
+        let leading = Self.leadingInset + badge.intrinsicContentSize.width + Self.pathGap
         let counts = Self.countsGap + countsLabel.intrinsicContentSize.width + Self.trailingGap
-        return bounds.width - leading - counts - trailing - Self.edgeInset
+        return bounds.width - leading - counts - trailing - Self.trailingInset
+    }
+
+    private func width(of view: NSView) -> CGFloat {
+        if view === sideChip { return ceil(sideLabel.intrinsicContentSize.width) + Self.chipPadding * 2 }
+        let intrinsic = view.intrinsicContentSize.width
+        return intrinsic == NSView.noIntrinsicMetric ? view.fittingSize.width : intrinsic
     }
 
     private func apply(_ level: Compaction) {
         positionLabel.isHidden = position.isEmpty || level >= .withoutPosition
         sideChip.isHidden = side.text.isEmpty || level >= .withoutSide
         let captions = level < .keycapsOnly
-        let layoutTitle = captions ? layout.title : ""
-        let closeTitle = captions ? Self.closeTitle : ""
-        if layoutButton.title != layoutTitle { layoutButton.title = layoutTitle }
-        if closeButton.title != closeTitle { closeButton.title = closeTitle }
+        for (button, title) in [(previousButton, Self.previousTitle), (nextButton, Self.nextTitle), (closeButton, Self.closeTitle)] {
+            let shown = captions ? title : ""
+            if button.title != shown { button.title = shown }
+        }
+        layoutControl.showsTitles = captions
         let shownCounts = level < .withoutCounts ? counts : NSAttributedString()
         if countsLabel.attributedStringValue != shownCounts { countsLabel.attributedStringValue = shownCounts }
     }
 
     func update(path: String, oldPath: String?, kind: ChangeKind?, additions: Int?, deletions: Int?, showCounts: Bool,
-                side: String, sideColor: NSColor?, position: String) {
+                side: Side, position: String) {
         let colors = theme.colors
         badge.isHidden = kind == nil
         if let kind { badge.kind = kind }
-        pathLabel.attributedStringValue = PanelText.path(path, oldPath: oldPath, colors: colors)
+        self.path = path
+        self.oldPath = oldPath
         pathLabel.toolTip = path
         fileName = path.split(separator: "/").last.map(String.init) ?? path
         counts = showCounts
             ? PanelText.counts(additions: additions, deletions: deletions, colors: colors)
             : NSAttributedString()
         countsLabel.attributedStringValue = counts
-        positionLabel.setRetroText(position, color: colors.textMuted)
+        positionLabel.setChromeText(position, font: ChromeFont.count, color: colors.textMuted)
+        previousButton.isEnabled = !position.isEmpty
+        nextButton.isEnabled = !position.isEmpty
         self.position = position
-        self.side = (side, sideColor)
+        self.side = side
         restyle()
     }
 
     func apply(theme: AppTheme) {
         self.theme = theme
         badge.apply(theme: theme)
+        previousButton.apply(theme: theme)
+        nextButton.apply(theme: theme)
+        layoutControl.apply(theme: theme)
+        layoutKeycaps.apply(theme: theme)
         closeButton.apply(theme: theme)
-        layoutButton.apply(theme: theme)
         restyle()
     }
 
     private func restyle() {
         let colors = theme.colors
-        layer?.backgroundColor = (isFocused ? colors.bgRaised : colors.bgPanel).cgColor
-        focusBar.isHidden = !isFocused
-        focusBar.layer?.backgroundColor = colors.accent.cgColor
-        bottomRule.layer?.backgroundColor = colors.borderSubtle.cgColor
-        let tint = side.color ?? colors.accent
-        sideChip.layer?.borderWidth = 1
-        sideChip.layer?.borderColor = tint.cgColor
-        sideChip.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
-        sideLabel.setRetroText(side.text, color: tint)
-        closeButton.hint = PanelText.keycap("diff.close")
-        layoutButton.hint = PanelText.keycap("diff.toggleLayout")
+        layer?.backgroundColor = colors.bgBase.cgColor
+        bottomRule.color = colors.borderSubtle
+        focusRule.color = colors.focusMark
+        focusRule.isHidden = !isFocused
+        sideChip.layer?.borderWidth = Chrome.hairline
+        sideChip.layer?.borderColor = colors.borderStrong.cgColor
+        let sideFont = switch side {
+        case .word: ChromeFont.sans(size: 11, weight: .medium)
+        case .identifier: ChromeFont.monoSmall
+        }
+        sideLabel.setChromeText(side.text, font: sideFont, color: colors.textMuted)
+        let settings = SettingsCenter.shared
+        previousButton.hint = settings.keycaps(for: "diff.previousHunk")
+        nextButton.hint = settings.keycaps(for: "diff.nextHunk")
+        closeButton.hint = settings.keycaps(for: "diff.close")
+        let layoutCaps = settings.keycaps(for: "diff.toggleLayout") ?? []
+        if layoutKeycaps.caps != layoutCaps { layoutKeycaps.caps = layoutCaps }
+        layoutKeycaps.isHidden = layoutCaps.isEmpty
         updateCompaction()
+    }
+}
+
+/// The diff's Split | Inline control (Folio `.segmented`): a 24 pt
+/// `bgOverlay` track holding two 20 pt segments, the active one raised with a
+/// `borderSubtle` edge and an ink Medium label, the other muted. Clicking the
+/// other segment calls `onSelect`. Without titles (a narrow strip) the
+/// segments keep only their icons.
+final class DiffLayoutControl: NSView {
+    /// Left to right.
+    static let segments: [DiffLayout] = [.split, .unified]
+    private static let segmentHeight: CGFloat = 20
+    private static let trackPadding: CGFloat = 2
+    private static let segmentPadding: CGFloat = 8
+    private static let iconGap: CGFloat = 5
+    private static let iconSize: CGFloat = 13
+
+    var layout = DiffLayout.unified {
+        didSet {
+            guard oldValue != layout else { return }
+            setAccessibilityValue(layout.title)
+            needsDisplay = true
+        }
+    }
+
+    var showsTitles = true {
+        didSet {
+            guard oldValue != showsTitles else { return }
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    /// Called with the clicked segment's layout when it is not the active one.
+    var onSelect: ((DiffLayout) -> Void)?
+
+    /// The segment titles drawn now, left to right; empty without titles.
+    var visibleTitles: [String] { showsTitles ? Self.segments.map(\.title) : [] }
+
+    private var theme: AppTheme
+
+    /// One segment's icon and label, active (ink, Medium) and inactive
+    /// (muted); built once per theme.
+    private struct Content {
+        var activeIcon: NSImage?
+        var inactiveIcon: NSImage?
+        var activeTitle: NSAttributedString
+        var inactiveTitle: NSAttributedString
+        var iconWidth: CGFloat
+        /// Of the Medium label, so the segments do not move when the active one changes.
+        var titleWidth: CGFloat
+    }
+
+    private var content: [DiffLayout: Content] = [:]
+
+    init(theme: AppTheme) {
+        self.theme = theme
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("Toggle Split Diff")
+        setAccessibilityValue(layout.title)
+        rebuildContent()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var isFlipped: Bool { true }
+
+    func apply(theme: AppTheme) {
+        self.theme = theme
+        rebuildContent()
+        needsDisplay = true
+    }
+
+    private static func symbolName(of layout: DiffLayout) -> String {
+        layout == .split ? "rectangle.split.2x1" : "list.bullet"
+    }
+
+    private func rebuildContent() {
+        let colors = theme.colors
+        let base = NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .regular)
+        for layout in Self.segments {
+            let image = NSImage(systemSymbolName: Self.symbolName(of: layout), accessibilityDescription: nil)
+            let activeIcon = image?.withSymbolConfiguration(base.applying(.init(paletteColors: [colors.textPrimary])))
+            let activeTitle = ChromeText.attributed(
+                layout.title, font: ChromeFont.labelStrong, color: colors.textPrimary, lineBreakMode: .byClipping
+            )
+            content[layout] = Content(
+                activeIcon: activeIcon,
+                inactiveIcon: image?.withSymbolConfiguration(base.applying(.init(paletteColors: [colors.textMuted]))),
+                activeTitle: activeTitle,
+                inactiveTitle: ChromeText.attributed(
+                    layout.title, font: ChromeFont.label, color: colors.textMuted, lineBreakMode: .byClipping
+                ),
+                iconWidth: ceil(activeIcon?.size.width ?? Self.iconSize),
+                titleWidth: ceil(activeTitle.size().width)
+            )
+        }
+        invalidateIntrinsicContentSize()
+    }
+
+    private func segmentWidth(of layout: DiffLayout) -> CGFloat {
+        guard let content = content[layout] else { return 0 }
+        var width = Self.segmentPadding * 2 + content.iconWidth
+        if showsTitles {
+            width += Self.iconGap + content.titleWidth
+        }
+        return width
+    }
+
+    private var segmentRects: [(layout: DiffLayout, rect: NSRect)] {
+        var x = Self.trackPadding
+        let y = floor((bounds.height - Self.segmentHeight) / 2)
+        return Self.segments.map { layout in
+            let width = segmentWidth(of: layout)
+            defer { x += width + Self.trackPadding }
+            return (layout, NSRect(x: x, y: y, width: width, height: Self.segmentHeight))
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let segments = Self.segments.reduce(0) { $0 + segmentWidth(of: $1) }
+        let gaps = Self.trackPadding * CGFloat(Self.segments.count + 1)
+        return NSSize(width: segments + gaps, height: Chrome.controlHeight)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let colors = theme.colors
+        colors.bgOverlay.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: Chrome.Radius.control, yRadius: Chrome.Radius.control).fill()
+        for (segment, rect) in segmentRects {
+            let isActive = segment == layout
+            if isActive {
+                let shape = NSBezierPath(
+                    roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: Chrome.Radius.cap, yRadius: Chrome.Radius.cap
+                )
+                colors.bgRaised.setFill()
+                shape.fill()
+                colors.borderSubtle.setStroke()
+                shape.lineWidth = Chrome.hairline
+                shape.stroke()
+            }
+            guard let content = content[segment] else { continue }
+            let x = rect.minX + Self.segmentPadding
+            if let icon = isActive ? content.activeIcon : content.inactiveIcon {
+                let size = icon.size
+                icon.draw(
+                    in: NSRect(x: x, y: rect.minY + floor((rect.height - size.height) / 2), width: size.width, height: size.height),
+                    from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil
+                )
+            }
+            guard showsTitles else { continue }
+            let title = isActive ? content.activeTitle : content.inactiveTitle
+            let height = title.size().height
+            title.draw(at: NSPoint(
+                x: x + content.iconWidth + Self.iconGap, y: rect.minY + floor((rect.height - height) / 2)
+            ))
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let hit = segmentRects.first(where: { $0.rect.insetBy(dx: -1, dy: -2).contains(point) }),
+              hit.layout != layout else { return }
+        onSelect?(hit.layout)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        onSelect?(layout.toggled)
+        return true
     }
 }

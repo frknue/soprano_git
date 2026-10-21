@@ -2,7 +2,7 @@
 
 ## Goal
 
-Soprano Git: a keyboard-first GitKraken copy in the Soprano family (Mission Control chrome,
+Soprano Git: a keyboard-first GitKraken copy in the Soprano family (Folio chrome,
 GitKraken layout and shortcuts, Soprano's ⌃A prefix). Phase 1 is the basics: a good commit
 graph and the everyday commands. The "cool features" follow in `docs/ROADMAP.md` order.
 

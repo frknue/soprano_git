@@ -28,7 +28,7 @@ commit="$(git -C "$soprano_dir" rev-parse "$ref^{commit}")"
 
 # source path in Soprano  →  destination path in this repo
 files=(
-    "Sources/Soprano/Views/RetroChrome.swift|Sources/SopranoGit/Vendored/RetroChrome.swift"
+    "Sources/Soprano/Views/Chrome.swift|Sources/SopranoGit/Vendored/Chrome.swift"
     "Sources/Soprano/Config/Theme.swift|Sources/SopranoGit/Vendored/Theme.swift"
     "Sources/Soprano/Utilities/NSColor+Hex.swift|Sources/SopranoGit/Vendored/NSColor+Hex.swift"
     "Sources/Soprano/Controllers/ThemeManager.swift|Sources/SopranoGit/Vendored/ThemeManager.swift"
@@ -40,8 +40,7 @@ files=(
     "Sources/Soprano/Utilities/AppVersion.swift|Sources/SopranoGit/Vendored/AppVersion.swift"
     "Sources/Soprano/Views/CodeSyntaxHighlighter.swift|Sources/SopranoGit/Vendored/CodeSyntaxHighlighter.swift"
     "Sources/Soprano/App/MainWindowSizing.swift|Sources/SopranoGit/Vendored/MainWindowSizing.swift"
-    "Sources/Soprano/Resources/DepartureMono-Regular.woff2|Sources/SopranoGit/Resources/DepartureMono-Regular.woff2"
-    "Support/Licenses/LICENSE-departure-mono|Support/Licenses/LICENSE-departure-mono"
+    "scripts/render-app-icon.swift|scripts/render-app-icon.swift"
 )
 
 staging="$(mktemp -d)"

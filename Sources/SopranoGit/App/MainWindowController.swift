@@ -5,9 +5,13 @@ import SopranoGitCore
 final class MainWindow: NSWindow {
     /// Skip AppKit's on-screen constraint (snapshot windows sit off-screen).
     var allowsOffscreenFrame = false
+    /// Draw as the key window although it never becomes key (snapshot
+    /// windows), so the focused list shows its selection pill and pencil tick.
+    var rendersAsKey = false
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    override var isKeyWindow: Bool { rendersAsKey || super.isKeyWindow }
 
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         allowsOffscreenFrame ? frameRect : super.constrainFrameRect(frameRect, to: screen)
@@ -74,9 +78,10 @@ final class WorkspaceTab {
     }
 }
 
-/// The single main window: Soprano chrome (full-size content, transparent
-/// titlebar, `.darkAqua`), the repository tab bar in the titlebar area, the
-/// selected tab's content, the keyboard router, palette and shortcut sheet.
+/// The single main window: Soprano's Folio chrome (full-size content,
+/// transparent titlebar, appearance from the theme), the repository tab bar
+/// in the titlebar area, the selected tab's content, the keyboard router,
+/// palette and shortcut sheet.
 @MainActor
 final class MainWindowController: NSWindowController, NSWindowDelegate {
     let state: AppStateStore
@@ -183,7 +188,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
 
     private func applyTheme() {
         window?.backgroundColor = theme.colors.bgBase
-        window?.appearance = NSAppearance(named: .darkAqua)
+        window?.appearance = theme.appearance.nsAppearance
         rootView.layer?.backgroundColor = theme.colors.bgBase.cgColor
         tabBar.apply(theme: theme)
     }
@@ -460,14 +465,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
                     icon: command.icon,
                     label: command.title,
                     description: command.category.rawValue,
-                    shortcut: settings.shortcutText(for: command.id),
+                    shortcut: settings.keycaps(for: command.id) ?? [],
                     searchText: command.id,
                     action: { [weak self] in
                         self?.perform(command.id)
                     }
                 )
             }
-        palette.show(relativeTo: window, commands: items)
+        palette.show(relativeTo: window, commands: items, searchShortcut: settings.keycaps(for: "palette.open") ?? [])
     }
 
     func showRecentPicker() {
@@ -479,7 +484,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
                 icon: open.contains(url.path) ? "folder.fill" : "folder",
                 label: url.lastPathComponent,
                 description: SettingsFile.displayPath(for: url),
-                shortcut: nil,
                 searchText: url.path,
                 action: { [weak self] in
                     Task { @MainActor in
@@ -488,7 +492,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
                 }
             )
         }
-        palette.show(relativeTo: window, commands: items, placeholder: "Search recent repositories...")
+        palette.show(
+            relativeTo: window,
+            commands: items,
+            placeholder: "Search recent repositories...",
+            searchShortcut: SettingsCenter.shared.keycaps(for: "repo.openRecent") ?? []
+        )
     }
 
     func showShortcuts() {

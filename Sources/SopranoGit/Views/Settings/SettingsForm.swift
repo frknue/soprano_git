@@ -1,21 +1,23 @@
 import AppKit
 
-/// Building blocks of the settings form, styled from one theme: titled
-/// cards, label/control rows, inputs, popups, issue rows. Soprano's settings
-/// screen in Soprano Git's tokens.
+/// Building blocks of the settings form, styled from one theme: eyebrow
+/// sections over raised cards, label/control rows, fields, popups and notice
+/// rows. Soprano's settings screen in Soprano Git's tokens.
 @MainActor
 struct SettingsForm {
     let theme: AppTheme
 
-    /// Horizontal padding inside a card.
-    static let cardInset: CGFloat = 14
+    /// Horizontal padding inside a card (`.form-row` padding 8 12).
+    static let cardInset: CGFloat = 12
+    /// Minimum height of a form row (`--h-form-row`).
+    static let rowHeight: CGFloat = 36
 
-    /// A page title (display 22) over a wrapping muted subtitle.
+    /// A page title (New York 22) over a wrapping muted subtitle.
     func header(title: String, subtitle: String) -> NSView {
         let colors = theme.colors
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.setRetroText(title, color: colors.textPrimary, size: 22)
-        let subtitleLabel = wrappingLabel(subtitle, color: colors.textMuted)
+        let titleLabel = NSTextField(labelWithString: "")
+        titleLabel.setChromeText(title, font: ChromeFont.screen, color: colors.textPrimary, tracking: -0.2)
+        let subtitleLabel = wrappingLabel(subtitle, color: colors.textMuted, size: 12)
         let stack = NSStackView(views: [titleLabel, subtitleLabel])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -25,7 +27,8 @@ struct SettingsForm {
         return stack
     }
 
-    /// A section: heading and optional subtitle above a flat card. Returns the
+    /// A section (`.settings-section`): eyebrow and optional note above a
+    /// raised card with an 8 pt radius and a `borderSubtle` edge. Returns the
     /// section and the card's row stack.
     func card(title: String, subtitle: String? = nil) -> (section: NSView, rows: NSStackView) {
         let colors = theme.colors
@@ -35,23 +38,30 @@ struct SettingsForm {
         section.spacing = 8
         section.translatesAutoresizingMaskIntoConstraints = false
 
-        let heading = RetroHeadingView(title: title, theme: theme)
-        section.addArrangedSubview(heading)
-        heading.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
-
+        // `.settings-section > .t-eyebrow` and its note sit 2 pt in.
+        let heading = ChromeEyebrowView(title: title, theme: theme)
+        let intro = NSStackView(views: [heading])
+        intro.orientation = .vertical
+        intro.alignment = .leading
+        intro.spacing = 4
+        intro.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
+        intro.translatesAutoresizingMaskIntoConstraints = false
+        heading.widthAnchor.constraint(equalTo: intro.widthAnchor, constant: -2).isActive = true
         if let subtitle {
             let label = wrappingLabel(subtitle, color: colors.textMuted)
-            section.addArrangedSubview(label)
-            section.setCustomSpacing(4, after: heading)
-            label.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
+            intro.addArrangedSubview(label)
+            label.widthAnchor.constraint(equalTo: intro.widthAnchor, constant: -2).isActive = true
         }
+        section.addArrangedSubview(intro)
+        intro.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
 
         let card = NSView()
         card.wantsLayer = true
-        card.layer?.cornerRadius = Retro.cornerRadius
-        card.layer?.borderWidth = Retro.hairline
-        card.layer?.backgroundColor = colors.bgPanel.cgColor
-        card.layer?.borderColor = colors.borderStrong.cgColor
+        card.layer?.cornerRadius = Chrome.Radius.card
+        card.layer?.masksToBounds = true
+        card.layer?.borderWidth = Chrome.hairline
+        card.layer?.backgroundColor = colors.raised.cgColor
+        card.layer?.borderColor = colors.borderSubtle.cgColor
         card.translatesAutoresizingMaskIntoConstraints = false
         section.addArrangedSubview(card)
         card.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
@@ -60,7 +70,7 @@ struct SettingsForm {
         rows.orientation = .vertical
         rows.alignment = .leading
         rows.spacing = 0
-        rows.edgeInsets = NSEdgeInsets(top: 6, left: Self.cardInset, bottom: 6, right: Self.cardInset)
+        rows.edgeInsets = NSEdgeInsets(top: 0, left: Self.cardInset, bottom: 0, right: Self.cardInset)
         rows.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(rows)
         NSLayoutConstraint.activate([
@@ -72,12 +82,12 @@ struct SettingsForm {
         return (section, rows)
     }
 
-    /// Adds views to a card's row stack at full content width, with inset
-    /// hairlines between them.
+    /// Adds views to a card's row stack at full content width, with
+    /// `borderSubtle` hairlines between them.
     func add(_ views: [NSView], to rows: NSStackView) {
         for view in views {
             if !rows.arrangedSubviews.isEmpty {
-                let rule = RetroRuleView(axis: .horizontal, style: .single, color: theme.colors.borderSubtle)
+                let rule = ChromeRuleView(axis: .horizontal, color: theme.colors.borderSubtle)
                 rows.addArrangedSubview(rule)
                 rule.widthAnchor.constraint(equalTo: rows.widthAnchor, constant: -2 * Self.cardInset).isActive = true
             }
@@ -86,16 +96,16 @@ struct SettingsForm {
         }
     }
 
-    /// A form row: display-face label (and an optional muted explanation
-    /// under it) on the left, the control pinned to the trailing edge.
+    /// A form row: SF Pro 13 label (and an optional SF Pro 11 note under it)
+    /// on the left, the control pinned to the trailing edge.
     func row(_ label: String, detail: String? = nil, detailColor: NSColor? = nil, control: NSView) -> NSView {
         let colors = theme.colors
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
 
-        let labelField = NSTextField(labelWithString: label)
+        let labelField = NSTextField(labelWithString: "")
         labelField.lineBreakMode = .byTruncatingTail
-        labelField.setRetroText(label, color: colors.textPrimary)
+        labelField.setChromeText(label, font: ChromeFont.row, color: colors.textPrimary)
         var texts: [NSView] = [labelField]
         if let detail {
             texts.append(wrappingLabel(detail, color: detailColor ?? colors.textMuted))
@@ -103,7 +113,7 @@ struct SettingsForm {
         let textStack = NSStackView(views: texts)
         textStack.orientation = .vertical
         textStack.alignment = .leading
-        textStack.spacing = 3
+        textStack.spacing = 1
         textStack.translatesAutoresizingMaskIntoConstraints = false
         textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         row.addSubview(textStack)
@@ -120,10 +130,10 @@ struct SettingsForm {
             textStack.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             control.trailingAnchor.constraint(equalTo: row.trailingAnchor),
             control.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 4),
-            row.heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
+            control.topAnchor.constraint(greaterThanOrEqualTo: row.topAnchor, constant: 6),
+            row.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.rowHeight),
         ])
-        let hug = row.heightAnchor.constraint(equalToConstant: 36)
+        let hug = row.heightAnchor.constraint(equalToConstant: Self.rowHeight)
         hug.priority = .defaultLow
         hug.isActive = true
         return row
@@ -140,8 +150,11 @@ struct SettingsForm {
         return stack
     }
 
-    func textField(_ value: String, placeholder: String? = nil, width: CGFloat) -> NSTextField {
+    /// A 24 pt field: raised fill, 6 pt radius, `borderStrong` edge. Paths are
+    /// SF Mono 12 (`monospaced`), everything else SF Pro 12.
+    func textField(_ value: String, placeholder: String? = nil, width: CGFloat, monospaced: Bool = false) -> NSTextField {
         let colors = theme.colors
+        let font = monospaced ? ChromeFont.mono : ChromeFont.sans(size: 12, tabular: true)
         let field = NSTextField(string: value)
         field.cell = SettingsFieldCell(textCell: value)
         field.isEditable = true
@@ -153,7 +166,7 @@ struct SettingsForm {
         // padded text rect.
         field.drawsBackground = false
         field.textColor = colors.textPrimary
-        field.font = RetroFont.body(12)
+        field.font = font
         field.usesSingleLineMode = true
         field.lineBreakMode = .byTruncatingMiddle
         field.cell?.isScrollable = true
@@ -161,20 +174,17 @@ struct SettingsForm {
         // Fields commit when they lose focus, not only on Return.
         field.cell?.sendsActionOnEndEditing = true
         field.wantsLayer = true
-        field.layer?.cornerRadius = Retro.cornerRadius
-        field.layer?.borderWidth = Retro.hairline
+        field.layer?.cornerRadius = Chrome.Radius.control
+        field.layer?.borderWidth = Chrome.hairline
         field.layer?.borderColor = colors.borderStrong.cgColor
-        field.layer?.backgroundColor = colors.bgRaised.cgColor
+        field.layer?.backgroundColor = colors.raised.cgColor
         if let placeholder {
-            field.placeholderAttributedString = NSAttributedString(
-                string: placeholder,
-                attributes: [.font: RetroFont.body(12), .foregroundColor: colors.textMuted]
-            )
+            field.placeholderAttributedString = ChromeText.attributed(placeholder, font: font, color: colors.textMuted)
         }
         field.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             field.widthAnchor.constraint(equalToConstant: width),
-            field.heightAnchor.constraint(equalToConstant: Retro.controlHeight - 4),
+            field.heightAnchor.constraint(equalToConstant: Chrome.controlHeight),
         ])
         return field
     }
@@ -194,7 +204,8 @@ struct SettingsForm {
     /// A popup whose items carry `value` as `representedObject`.
     func popup(_ items: [(title: String, value: String)], selected: String, width: CGFloat = 240) -> NSPopUpButton {
         let popup = NSPopUpButton(frame: .zero, pullsDown: false)
-        popup.font = RetroFont.body(12)
+        popup.font = ChromeFont.label
+        popup.controlSize = .regular
         for item in items {
             popup.addItem(withTitle: item.title)
             popup.lastItem?.representedObject = item.value
@@ -207,13 +218,14 @@ struct SettingsForm {
         return popup
     }
 
-    func button(_ title: String, kind: RetroButton.Kind = .standard, target: AnyObject?, action: Selector) -> RetroButton {
-        RetroButton(title: title, theme: theme, kind: kind, target: target, action: action)
+    func button(_ title: String, kind: ChromeButton.Kind = .standard, target: AnyObject?, action: Selector) -> ChromeButton {
+        ChromeButton(title: title, theme: theme, kind: kind, target: target, action: action)
     }
 
+    /// Wrapping SF Pro text: 11 for notes (`.form-note`), 12 for prose.
     func wrappingLabel(_ text: String, color: NSColor, size: CGFloat = 11) -> NSTextField {
         let label = NSTextField(wrappingLabelWithString: text)
-        label.font = RetroFont.body(size)
+        label.font = ChromeFont.sans(size: size)
         label.textColor = color
         label.maximumNumberOfLines = 0
         label.isSelectable = false
@@ -222,34 +234,41 @@ struct SettingsForm {
         return label
     }
 
-    /// One settings.json problem: a tinted box with its line number.
+    /// One settings.json problem: a notice box (8 pt radius, status wash) with
+    /// its status mark and line number.
     func issueRow(_ issue: ConfigIssue) -> NSView {
         let colors = theme.colors
-        let tint = issue.severity == .error ? colors.danger : colors.yellow
+        let status: ChromeStatus = issue.severity == .error ? .error : .needsInput
         let box = NSView()
         box.wantsLayer = true
-        box.layer?.cornerRadius = Retro.cornerRadius
-        box.layer?.borderWidth = Retro.hairline
-        box.layer?.backgroundColor = tint.withAlphaComponent(0.12).cgColor
-        box.layer?.borderColor = tint.withAlphaComponent(0.45).cgColor
+        box.layer?.cornerRadius = Chrome.Radius.card
+        box.layer?.backgroundColor = (status.headerWash(in: colors) ?? colors.needsInputWash).cgColor
         box.translatesAutoresizingMaskIntoConstraints = false
+        let mark = ChromeStatusMark()
+        mark.set(status: status, colors: colors)
+        mark.translatesAutoresizingMaskIntoConstraints = false
         let location = issue.line.map { "Line \($0): " } ?? ""
-        let label = wrappingLabel(location + issue.message, color: colors.textPrimary)
+        let label = wrappingLabel(location + issue.message, color: colors.textPrimary, size: 12)
+        box.addSubview(mark)
         box.addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
+            mark.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
+            mark.topAnchor.constraint(equalTo: box.topAnchor, constant: 12),
+            label.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 8),
             label.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
-            label.topAnchor.constraint(equalTo: box.topAnchor, constant: 7),
-            label.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -7),
+            label.topAnchor.constraint(equalTo: box.topAnchor, constant: 8),
+            label.bottomAnchor.constraint(equalTo: box.bottomAnchor, constant: -8),
         ])
         return box
     }
 }
 
-/// A page key in the settings sidebar: a square strip key, the active page a
-/// lit accent block with panel-colored ink (Soprano's settings tabs).
+/// A page in the settings sidebar (`.nav-item`): a 30 pt row with a 14 pt
+/// symbol and an SF Pro 12 title, muted; the active page a raised pill with a
+/// `borderSubtle` edge and an ink Medium title; hover a `hover` pill.
 final class SettingsPageButton: NSButton {
-    private static let inset: CGFloat = 12
+    static let height: CGFloat = 30
+    private static let inset: CGFloat = 10
     private static let symbolSlot: CGFloat = 16
 
     var isActive = false {
@@ -285,16 +304,19 @@ final class SettingsPageButton: NSButton {
         needsDisplay = true
     }
 
+    /// The selection idiom the row draws in its current state.
+    var pillStyle: ChromeSelectionPill.Style {
+        isActive ? .raisedTab : (isHovered ? .hover : .none)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let colors = theme.colors
-        let fill: NSColor = isActive ? colors.accent : (isHovered ? colors.bgOverlay : .clear)
-        let ink = isActive ? colors.bgPanel : colors.textMuted
-        fill.setFill()
-        bounds.fill()
+        ChromeSelectionPill.draw(pillStyle, in: bounds, colors: colors, inset: 0)
+        let ink = isActive ? colors.textPrimary : colors.textMuted
 
         var x = Self.inset
         if let symbol {
-            let configuration = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+            let configuration = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
                 .applying(NSImage.SymbolConfiguration(paletteColors: [ink]))
             let tinted = symbol.withSymbolConfiguration(configuration) ?? symbol
             let size = tinted.size
@@ -311,9 +333,9 @@ final class SettingsPageButton: NSButton {
                 respectFlipped: true,
                 hints: nil
             )
-            x += Self.symbolSlot + 10
+            x += Self.symbolSlot + 8
         }
-        let label = RetroText.display(title, color: ink, tracking: 0)
+        let label = ChromeText.attributed(title, font: isActive ? ChromeFont.labelStrong : ChromeFont.label, color: ink)
         let height = ceil(label.size().height)
         label.draw(in: NSRect(x: x, y: floor((bounds.height - height) / 2), width: max(0, bounds.width - x - Self.inset), height: height))
     }
@@ -331,9 +353,9 @@ final class SettingsPageButton: NSButton {
 }
 
 /// A field cell that centers its single line vertically and pads it
-/// horizontally, so borderless settings inputs read like the search field.
+/// horizontally (`.field` padding 0 8).
 final class SettingsFieldCell: NSTextFieldCell {
-    private static let horizontalPadding: CGFloat = 6
+    private static let horizontalPadding: CGFloat = 8
 
     override func drawingRect(forBounds rect: NSRect) -> NSRect {
         var frame = super.drawingRect(forBounds: rect).insetBy(dx: Self.horizontalPadding, dy: 0)

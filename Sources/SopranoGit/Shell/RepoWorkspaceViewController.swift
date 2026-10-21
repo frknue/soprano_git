@@ -1,7 +1,7 @@
 import AppKit
 import SopranoGitCore
 
-/// One open repository tab: toolbar, double rule, sidebar | center (banner +
+/// One open repository tab: toolbar, one hairline, sidebar | center (banner +
 /// graph or diff) | commit panel, status bar, and the error toast.
 @MainActor
 final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSplitViewDelegate {
@@ -26,15 +26,15 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
 
     private let state: AppStateStore
     private var theme: AppTheme
-    private let toolbar: WorkspaceToolbarView
-    private let toolbarRule = RetroRuleView(axis: .horizontal, style: .double)
+    let toolbar: WorkspaceToolbarView
+    private let toolbarRule = ChromeRuleView(axis: .horizontal)
     private let splitView = WorkspaceSplitView()
     private let sidebarContainer = NSView()
     private let centerContainer = NSView()
     private let commitContainer = NSView()
     private let banner: OperationBannerView
     private let centerHost = NSView()
-    private let statusBar: WorkspaceStatusBarView
+    let statusBar: WorkspaceStatusBarView
     private let toast: ErrorToastView
     private var bannerHeight: NSLayoutConstraint!
     private var didApplyInitialWidths = false
@@ -199,12 +199,17 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
     private func applyTheme() {
         let colors = theme.colors
         view.layer?.backgroundColor = colors.bgBase.cgColor
-        toolbarRule.color = colors.borderStrong
+        toolbarRule.color = colors.borderSubtle
         splitView.dividerTint = colors.borderSubtle
         splitView.needsDisplay = true
-        for container in [sidebarContainer, centerContainer, commitContainer, centerHost] {
+        // Side panels sit on bgPanel, the graph and diff on bgBase.
+        for container in [sidebarContainer, commitContainer] {
             container.wantsLayer = true
             container.layer?.backgroundColor = colors.bgPanel.cgColor
+        }
+        for container in [centerContainer, centerHost] {
+            container.wantsLayer = true
+            container.layer?.backgroundColor = colors.bgBase.cgColor
         }
         toolbar.apply(theme: theme)
         banner.apply(theme: theme)
@@ -264,11 +269,13 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
         focusMaybeChanged()
     }
 
-    /// Re-reads toolbar, banner and status bar from the controller.
+    /// Re-reads toolbar, banner and status bar from the controller; the status
+    /// bar's hints follow the focused region.
     func refreshChrome() {
         guard isViewLoaded else { return }
         let context = commandContext?()
         toolbar.update(repoName: controller.displayName, refs: controller.refs, context: context)
+        toolbar.setPanelVisibility(sidebar: isSidebarVisible, commitPanel: isCommitPanelVisible)
         if let operation = controller.status.operation {
             banner.isHidden = false
             bannerHeight.constant = OperationBannerView.height
@@ -283,7 +290,8 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
             commitCount: controller.commits.count,
             hasMore: controller.hasMoreCommits,
             loading: !controller.hasLoaded,
-            loadError: controller.loadError
+            loadError: controller.loadError,
+            focus: lastFocusedRegion
         )
     }
 
@@ -383,6 +391,7 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
         let hadFocus = focusedRegion
         container.isHidden = !visible
         state.setBool(visible, forKey: key)
+        toolbar.setPanelVisibility(sidebar: isSidebarVisible, commitPanel: isCommitPanelVisible)
         splitView.adjustSubviews()
         if didApplyInitialWidths { applyPanelWidths() }
         if !visible, hadFocus == (container === sidebarContainer ? .sidebar : .detail) {
@@ -433,5 +442,5 @@ final class WorkspaceSplitView: NSSplitView {
     var dividerTint: NSColor = .separatorColor
 
     override var dividerColor: NSColor { dividerTint }
-    override var dividerThickness: CGFloat { Retro.hairline }
+    override var dividerThickness: CGFloat { Chrome.hairline }
 }
