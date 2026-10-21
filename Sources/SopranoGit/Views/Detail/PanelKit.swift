@@ -1,26 +1,62 @@
 import AppKit
 import SopranoGitCore
 
-/// A compact console key with an inline keycap hint, for row actions, section
-/// headers, hunk headers and the composer: `[STAGE  S]`. Standard keys sit on
-/// `bgRaised`; prominent keys are lit accent; danger keys light `danger` on hover.
+/// A Folio button with a trailing K1 keycap group, for row actions, section
+/// headings, hunk headers and the composer: `Stage S`, `Commit ⌘↵`.
+///
+/// Kinds follow `ChromeButton`: `standard` is a raised 6 pt button with a
+/// `borderStrong` edge, `ink` is the primary action, `text` is borderless.
+/// `danger` stays calm at rest (standard, or borderless when `isPlain`) and
+/// fills with `danger` under the pointer, so destructive row keys do not shout.
+/// Pressed is `bgOverlay`. Every chord is its own cap (`⌃A` `P`).
 final class KeyHintButton: NSButton {
-    enum Kind {
-        case standard
-        case prominent
-        case danger
+    typealias Kind = ChromeButton.Kind
+
+    /// Row and header actions: 20 pt, SF Pro 11, 6 pt padding.
+    static let compactHeight: CGFloat = 20
+    private static let capHeight = Chrome.keycapHeightSmall
+    private static let capGap: CGFloat = 3
+    private static let defaultContentGap: CGFloat = 6
+
+    /// Overrides the side padding (nil: 6 when compact, else 10).
+    var horizontalPadding: CGFloat? {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
     }
 
-    static let compactHeight: CGFloat = 20
-    static let padding: CGFloat = 6
-    static let hintGap: CGFloat = 5
+    /// Overrides the gap between icon, title and caps (nil: 6).
+    var contentGap: CGFloat? {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
 
     var kind: Kind {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    /// Borderless at rest (section headings); `text` buttons always are.
+    var isPlain = false {
         didSet { needsDisplay = true }
     }
 
-    /// Keycap text drawn after the title; nil hides it.
-    var hint: String? {
+    /// K1 keycaps drawn after the title, one cap per chord; nil hides them.
+    var hint: [String]? {
+        didSet {
+            guard hint != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    /// SF Symbol drawn before the title, muted (13 pt; 12 pt when compact).
+    var symbolName: String? {
         didSet {
             invalidateIntrinsicContentSize()
             needsDisplay = true
@@ -30,11 +66,11 @@ final class KeyHintButton: NSButton {
     private var theme: AppTheme
     private let height: CGFloat
     private var hoverArea: NSTrackingArea?
-    private var isHovered = false {
+    private(set) var isHovered = false {
         didSet { if oldValue != isHovered { needsDisplay = true } }
     }
 
-    init(title: String, hint: String?, theme: AppTheme, kind: Kind = .standard, height: CGFloat = KeyHintButton.compactHeight) {
+    init(title: String, hint: [String]?, theme: AppTheme, kind: Kind = .standard, height: CGFloat = KeyHintButton.compactHeight) {
         self.kind = kind
         self.hint = hint
         self.theme = theme
@@ -63,6 +99,10 @@ final class KeyHintButton: NSButton {
         didSet { needsDisplay = true }
     }
 
+    override var isHighlighted: Bool {
+        didSet { needsDisplay = true }
+    }
+
     /// Never steals keyboard focus from the list it sits in.
     override var acceptsFirstResponder: Bool { false }
 
@@ -71,90 +111,151 @@ final class KeyHintButton: NSButton {
         needsDisplay = true
     }
 
-    /// No gap before the keycap when the title is empty (a keycap-only button).
-    private var gap: CGFloat { title.isEmpty ? 0 : Self.hintGap }
+    // MARK: - Metrics
+
+    private var isCompact: Bool { height < Chrome.controlHeight }
+    private var padding: CGFloat { horizontalPadding ?? (isCompact ? 6 : ChromeButton.horizontalPadding) }
+    private var gap: CGFloat { contentGap ?? Self.defaultContentGap }
+    private var isBorderless: Bool { kind == .text || isPlain }
+
+    private var labelFont: NSFont {
+        let weight: NSFont.Weight = kind == .ink ? .medium : .regular
+        return ChromeFont.sans(size: isCompact ? 11 : 12, weight: weight)
+    }
+
+    private func label(color: NSColor) -> NSAttributedString {
+        ChromeText.attributed(title, font: labelFont, color: color, lineBreakMode: .byClipping)
+    }
+
+    private func symbol(color: NSColor) -> NSImage? {
+        guard let symbolName,
+              let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) else { return nil }
+        let configuration = NSImage.SymbolConfiguration(pointSize: isCompact ? 12 : 13, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        return image.withSymbolConfiguration(configuration)
+    }
+
+    private func capWidths(_ caps: [String]) -> [CGFloat] {
+        caps.map { ChromeKeycapView.capWidth($0, font: ChromeFont.keycap, height: Self.capHeight, padding: 4) }
+    }
+
+    private func capsWidth(_ caps: [String]) -> CGFloat {
+        let widths = capWidths(caps)
+        return widths.reduce(0, +) + CGFloat(max(0, widths.count - 1)) * Self.capGap
+    }
+
+    /// Icon, title and caps with their gaps.
+    private func contentWidth(label: NSAttributedString, icon: NSImage?) -> CGFloat {
+        var width = title.isEmpty ? 0 : ceil(label.size().width)
+        if let icon {
+            width += ceil(icon.size.width) + (title.isEmpty ? 0 : gap)
+        }
+        if let hint, !hint.isEmpty {
+            width += (width > 0 ? gap : 0) + capsWidth(hint)
+        }
+        return width
+    }
 
     override var intrinsicContentSize: NSSize {
-        var width = ceil(RetroText.display(title, color: .labelColor).size().width) + Self.padding * 2
-        if let hint {
-            width += gap + capSize(for: hint).width
-        }
-        return NSSize(width: width, height: height)
+        let width = contentWidth(label: label(color: .labelColor), icon: symbol(color: .labelColor))
+        return NSSize(width: ceil(width) + padding * 2, height: height)
     }
 
-    private func capSize(for hint: String) -> NSSize {
-        let text = RetroText.display(hint, color: .labelColor, tracking: 0)
-        return NSSize(width: ceil(text.size().width) + 8, height: 14)
-    }
+    // MARK: - Drawing
 
     private struct Palette {
-        var fill: NSColor
-        var edge: NSColor
-        var ink: NSColor
+        var fill: NSColor?
+        var edge: NSColor?
+        var text: NSColor
+        var icon: NSColor
+        var capFill: NSColor?
         var capEdge: NSColor
+        var capText: NSColor
     }
 
     private var palette: Palette {
         let colors = theme.colors
         let pressed = isEnabled && isHighlighted
-        guard isEnabled else {
-            return Palette(fill: colors.bgRaised, edge: colors.borderSubtle, ink: colors.textMuted, capEdge: colors.borderSubtle)
-        }
+        let hot = isEnabled && isHovered
         switch kind {
-        case .prominent:
-            let fill = pressed ? colors.accentStrong : colors.accent
-            return Palette(fill: fill, edge: fill, ink: colors.bgPanel, capEdge: colors.bgPanel.withAlphaComponent(0.6))
-        case .danger:
-            if pressed || isHovered {
-                let fill = pressed ? colors.danger : colors.danger.withAlphaComponent(0.18)
-                return Palette(fill: fill, edge: colors.danger, ink: pressed ? colors.bgPanel : colors.danger, capEdge: colors.danger)
+        case .ink:
+            guard isEnabled else {
+                return Palette(fill: colors.bgOverlay, edge: colors.bgOverlay, text: colors.textMuted, icon: colors.textMuted,
+                               capFill: nil, capEdge: colors.textMuted.withAlphaComponent(0.35), capText: colors.textMuted)
             }
-            return Palette(fill: colors.bgRaised, edge: colors.borderStrong, ink: colors.textPrimary, capEdge: colors.borderSubtle)
-        case .standard:
-            if pressed {
-                return Palette(fill: colors.accentStrong, edge: colors.accentStrong, ink: colors.bgPanel, capEdge: colors.bgPanel)
+            let fill = pressed || hot ? colors.inkButtonPressed : colors.inkButtonFill
+            let label = colors.inkButtonLabel
+            return Palette(fill: fill, edge: fill, text: label, icon: label,
+                           capFill: nil, capEdge: label.withAlphaComponent(0.35), capText: label)
+        case .danger where pressed || hot:
+            let fill = pressed ? colors.dangerButtonHover : colors.dangerButtonFill
+            let label = colors.dangerButtonLabel
+            return Palette(fill: fill, edge: fill, text: label, icon: label,
+                           capFill: nil, capEdge: label.withAlphaComponent(0.40), capText: label)
+        case .standard, .text, .danger:
+            let plain = isBorderless
+            guard isEnabled else {
+                return Palette(fill: nil, edge: plain ? nil : colors.borderSubtle, text: colors.textMuted, icon: colors.textMuted,
+                               capFill: nil, capEdge: colors.borderSubtle, capText: colors.textMuted)
             }
-            return Palette(
-                fill: isHovered ? colors.bgOverlay : colors.bgRaised,
-                edge: isHovered ? colors.accent : colors.borderStrong,
-                ink: colors.textPrimary,
-                capEdge: colors.borderSubtle
-            )
+            let fill: NSColor? = pressed ? colors.bgOverlay : (hot ? colors.hover : (plain ? nil : colors.raised))
+            // Plain header buttons (`Copy Y`) read muted until pointed at.
+            let text = plain && isCompact && !(hot || pressed) ? colors.textMuted : colors.textPrimary
+            return Palette(fill: fill, edge: plain ? nil : colors.borderStrong, text: text,
+                           icon: hot || pressed ? colors.textPrimary : colors.textMuted,
+                           capFill: colors.keycapFill, capEdge: colors.keycapEdge,
+                           capText: plain ? colors.textMuted : colors.textPrimary)
         }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let palette = palette
-        palette.fill.setFill()
-        bounds.fill()
-        palette.edge.setStroke()
-        let frame = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
-        frame.lineWidth = Retro.hairline
-        frame.stroke()
-
-        let label = RetroText.display(title, color: palette.ink, lineBreakMode: .byClipping)
-        let labelSize = label.size()
-        var contentWidth = ceil(labelSize.width)
-        var cap: NSSize = .zero
-        if let hint {
-            cap = capSize(for: hint)
-            contentWidth += gap + cap.width
+        let shape = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: Chrome.Radius.control,
+            yRadius: Chrome.Radius.control
+        )
+        if let fill = palette.fill {
+            fill.setFill()
+            shape.fill()
         }
-        var x = floor((bounds.width - contentWidth) / 2)
-        label.draw(at: NSPoint(x: x, y: floor((bounds.height - labelSize.height) / 2)))
-        x += ceil(labelSize.width)
-        if let hint {
-            x += gap
-            let capRect = NSRect(x: x, y: floor((bounds.height - cap.height) / 2), width: cap.width, height: cap.height)
-            palette.capEdge.setStroke()
-            let edge = NSBezierPath(rect: capRect.insetBy(dx: 0.5, dy: 0.5))
-            edge.lineWidth = Retro.hairline
-            edge.stroke()
-            let text = RetroText.display(hint, color: palette.ink.withAlphaComponent(0.8), tracking: 0)
-            let size = text.size()
-            text.draw(at: NSPoint(x: capRect.midX - size.width / 2, y: capRect.midY - size.height / 2))
+        if let edge = palette.edge {
+            edge.setStroke()
+            shape.lineWidth = Chrome.hairline
+            shape.stroke()
+        }
+
+        let string = label(color: palette.text)
+        let icon = symbol(color: palette.icon)
+        var x = floor((bounds.width - contentWidth(label: string, icon: icon)) / 2)
+        if let icon {
+            let size = icon.size
+            icon.draw(in: NSRect(x: x, y: floor((bounds.height - size.height) / 2), width: size.width, height: size.height))
+            x += ceil(size.width) + (title.isEmpty ? 0 : gap)
+        }
+        if !title.isEmpty {
+            let size = string.size()
+            string.draw(at: NSPoint(x: x, y: floor((bounds.height - size.height) / 2)))
+            x += ceil(size.width)
+        }
+        guard let hint, !hint.isEmpty else { return }
+        if icon != nil || !title.isEmpty { x += gap }
+        let top = floor((bounds.height - Self.capHeight) / 2)
+        for (legend, width) in zip(hint, capWidths(hint)) {
+            ChromeKeycapView.drawCap(
+                legend,
+                in: NSRect(x: x, y: top, width: width, height: Self.capHeight),
+                fill: palette.capFill,
+                edge: palette.capEdge,
+                text: palette.capText,
+                font: ChromeFont.keycap,
+                radius: Chrome.Radius.cap
+            )
+            x += width + Self.capGap
         }
     }
+
+    // MARK: - Hover
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -180,31 +281,46 @@ final class KeyHintButton: NSButton {
 
 /// Text builders shared by the commit panel and the diff view.
 enum PanelText {
-    /// A path with its directory muted and the file name bright; renames read
-    /// `old → new` with the old path muted.
-    static func path(_ path: String, oldPath: String? = nil, colors: ThemeColors, size: CGFloat = 12) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        let font = RetroFont.body(size)
-        let muted: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colors.textMuted]
-        let bright: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: colors.textPrimary]
-        if let oldPath, oldPath != path {
-            result.append(NSAttributedString(string: oldPath + " → ", attributes: muted))
+    /// The prefix that stands in for dropped leading path components.
+    static let elision = "…/"
+
+    /// A path in SF Mono 12: directory muted, file name Semibold ink; renames
+    /// read `old → new` with the old path muted. With `availableWidth`, a path
+    /// that does not fit drops whole leading components behind `…/`
+    /// (`…/Views/SidebarView.swift`, then `…/SidebarView.swift`); a rename
+    /// first shortens its old side to the file name, then drops it.
+    static func path(_ path: String, oldPath: String? = nil, colors: ThemeColors, availableWidth: CGFloat? = nil) -> NSAttributedString {
+        let rename = oldPath.flatMap { $0 == path ? nil : $0 }
+        let (directory, name) = split(path)
+        let full = compose(old: rename, directory: directory, name: name, colors: colors)
+        guard let availableWidth, !fits(full, availableWidth) else { return full }
+
+        let folders = directory.split(separator: "/").map(String.init)
+        // Shorter and shorter directories: all folders, then drop one leading folder at a time.
+        let directories = (0...folders.count).map { dropped -> String in
+            if dropped == 0 { return directory }
+            let kept = folders.dropFirst(dropped)
+            return kept.isEmpty ? elision : elision + kept.joined(separator: "/") + "/"
         }
-        if let slash = path.lastIndex(of: "/") {
-            result.append(NSAttributedString(string: String(path[...slash]), attributes: muted))
-            result.append(NSAttributedString(string: String(path[path.index(after: slash)...]), attributes: bright))
-        } else {
-            result.append(NSAttributedString(string: path, attributes: bright))
+        var olds: [String?] = []
+        if let rename {
+            olds.append(split(rename).name)
         }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingHead
-        result.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: result.length))
-        return result
+        olds.append(nil)
+        for old in olds {
+            for candidate in directories {
+                let text = compose(old: old, directory: candidate, name: name, colors: colors)
+                if fits(text, availableWidth) { return text }
+            }
+        }
+        // Not even the file name fits: the label truncates its head.
+        return compose(old: nil, directory: folders.isEmpty ? "" : elision, name: name, colors: colors)
     }
 
-    /// `+a −d` in success/danger; `bin` for binary files; empty when unknown.
-    static func counts(additions: Int?, deletions: Int?, colors: ThemeColors, size: CGFloat = 11) -> NSAttributedString {
-        let font = RetroFont.body(size)
+    /// `+a −d` in SF Mono 11: additions success, deletions danger, a zero side
+    /// muted; `bin` for binary files; empty when nothing changed.
+    static func counts(additions: Int?, deletions: Int?, colors: ThemeColors) -> NSAttributedString {
+        let font = ChromeFont.monoSmall
         guard let additions, let deletions else {
             return NSAttributedString(string: "bin", attributes: [.font: font, .foregroundColor: colors.textMuted])
         }
@@ -212,66 +328,141 @@ enum PanelText {
             return NSAttributedString()
         }
         let result = NSMutableAttributedString()
-        result.append(NSAttributedString(string: "+\(additions)", attributes: [.font: font, .foregroundColor: colors.success]))
-        result.append(NSAttributedString(string: " −\(deletions)", attributes: [.font: font, .foregroundColor: colors.danger]))
+        result.append(NSAttributedString(
+            string: "+\(additions)",
+            attributes: [.font: font, .foregroundColor: additions == 0 ? colors.textMuted : colors.success]
+        ))
+        result.append(NSAttributedString(string: " ", attributes: [.font: font]))
+        result.append(NSAttributedString(
+            string: "−\(deletions)",
+            attributes: [.font: font, .foregroundColor: deletions == 0 ? colors.textMuted : colors.danger]
+        ))
         return result
     }
 
-    /// The compact keycap text of a command's first chord ("S", "⌘⇧S").
-    @MainActor
-    static func keycap(_ commandID: String) -> String? {
-        SettingsCenter.shared.keycapText(for: commandID)
+    /// `("Sources/App/", "main.swift")`; the directory keeps its trailing slash.
+    private static func split(_ path: String) -> (directory: String, name: String) {
+        guard let slash = path.lastIndex(of: "/") else { return ("", path) }
+        return (String(path[...slash]), String(path[path.index(after: slash)...]))
+    }
+
+    private static func fits(_ text: NSAttributedString, _ width: CGFloat) -> Bool {
+        ceil(text.size().width) <= width
+    }
+
+    private static func compose(old: String?, directory: String, name: String, colors: ThemeColors) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let muted: [NSAttributedString.Key: Any] = [.font: ChromeFont.mono, .foregroundColor: colors.textMuted]
+        if let old {
+            result.append(NSAttributedString(string: old + " → ", attributes: muted))
+        }
+        if !directory.isEmpty {
+            result.append(NSAttributedString(string: directory, attributes: muted))
+        }
+        result.append(NSAttributedString(
+            string: name,
+            attributes: [.font: ChromeFont.monospaced(size: 12, weight: .semibold), .foregroundColor: colors.textPrimary]
+        ))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingHead
+        result.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: result.length))
+        return result
     }
 }
 
-/// A square ref label: display face 11, outlined in its color, lit (filled)
-/// for the checked-out branch.
+/// A ref label drawn like the graph's pills: 18 pt, radius 4, a 10 % fill of
+/// the commit's lane color with a 1 pt lane edge, SF Pro 11 Medium ink and
+/// lane-colored SF Symbols. HEAD's ref is the ink pill.
 final class RefPillView: NSView {
-    enum Kind {
-        case head
+    enum Kind: Equatable {
         case localBranch
         case remoteBranch
         case tag
+        /// `HEAD` while detached.
+        case detachedHead
     }
 
-    private let label = NSTextField(labelWithString: "")
-    private let name: String
-    private let kind: Kind
+    /// One pill: its name, kind, and whether HEAD points at it.
+    struct Ref: Equatable {
+        var name: String
+        var kind: Kind
+        var isHead: Bool = false
+    }
 
-    init(name: String, kind: Kind, theme: AppTheme) {
-        self.name = name
-        self.kind = kind
+    static let height: CGFloat = 18
+    static let maximumWidth: CGFloat = 160
+
+    let ref: Ref
+    private let stack = NSStackView()
+    private let label = NSTextField(labelWithString: "")
+    private var icons: [NSImageView] = []
+    /// The pill's fill: the ink pill on HEAD, else the lane at 10 %.
+    private(set) var fillColor: NSColor = .clear
+
+    /// `lane` indexes `theme.graphLanes`, the color the graph gives the commit.
+    init(ref: Ref, lane: Int, theme: AppTheme) {
+        self.ref = ref
         super.init(frame: .zero)
         wantsLayer = true
-        label.translatesAutoresizingMaskIntoConstraints = false
+        stack.orientation = .horizontal
+        stack.spacing = 4
+        stack.alignment = .centerY
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 6, bottom: 0, right: 6)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for name in Self.symbolNames(for: ref) {
+            let icon = NSImageView()
+            icon.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
+            icon.setContentHuggingPriority(.required, for: .horizontal)
+            icon.setContentCompressionResistancePriority(.required, for: .horizontal)
+            icons.append(icon)
+            stack.addArrangedSubview(icon)
+        }
         label.lineBreakMode = .byTruncatingTail
-        addSubview(label)
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        stack.addArrangedSubview(label)
+        addSubview(stack)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            heightAnchor.constraint(equalToConstant: 18),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: Self.height),
+            widthAnchor.constraint(lessThanOrEqualToConstant: Self.maximumWidth),
         ])
-        apply(theme: theme)
+        apply(theme: theme, lane: lane)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func apply(theme: AppTheme) {
-        let colors = theme.colors
-        let tint: NSColor = switch kind {
-        case .head, .localBranch: colors.accent
-        case .remoteBranch: colors.blue
-        case .tag: colors.yellow
+    /// The ref icons, as in the graph: a tick on HEAD, then the ref's kind.
+    static func symbolNames(for ref: Ref) -> [String] {
+        var names = ref.isHead ? ["checkmark"] : []
+        switch ref.kind {
+        case .localBranch: names.append("laptopcomputer")
+        case .remoteBranch: names.append("cloud")
+        case .tag: names.append("tag")
+        case .detachedHead: break
         }
-        let lit = kind == .head
-        layer?.cornerRadius = 0
-        layer?.borderWidth = 1
-        layer?.borderColor = tint.cgColor
-        layer?.backgroundColor = (lit ? tint : tint.withAlphaComponent(0.12)).cgColor
-        label.setRetroText(name, color: lit ? colors.bgPanel : tint)
-        toolTip = name
+        return names
+    }
+
+    func apply(theme: AppTheme, lane: Int) {
+        let colors = theme.colors
+        let lanes = theme.graphLanes
+        let laneColor = lanes[lane % lanes.count]
+        let ink = ref.isHead ? colors.inkButtonLabel : colors.textPrimary
+        fillColor = ref.isHead ? colors.inkButtonFill : laneColor.withAlphaComponent(0.10)
+        layer?.cornerRadius = Chrome.Radius.cap
+        layer?.backgroundColor = fillColor.cgColor
+        layer?.borderWidth = ref.isHead ? 0 : Chrome.hairline
+        layer?.borderColor = laneColor.cgColor
+        for icon in icons {
+            icon.contentTintColor = ref.isHead ? colors.inkButtonLabel : laneColor
+        }
+        label.setChromeText(ref.name, font: ChromeFont.sans(size: 11, weight: .medium), color: ink)
+        toolTip = ref.name
     }
 }
 

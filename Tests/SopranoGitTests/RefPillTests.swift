@@ -78,7 +78,7 @@ struct RefPillTests {
         #expect(pills[1].target == .tag(snapshot.tags[1]))
     }
 
-    @Test func theCheckedOutBranchIsLitAndComesFirst() {
+    @Test func theCheckedOutBranchIsTheHeadPillAndComesFirst() {
         let snapshot = refs(
             local: [local("alpha", at: "c1"), local("main", at: "c1", isHead: true)],
             tags: [SopranoGitCore.Tag(name: "v1", fullName: "refs/tags/v1", target: "c1", isAnnotated: false)]
@@ -90,7 +90,7 @@ struct RefPillTests {
         #expect(pills.map(\.isHead) == [true, false, false])
     }
 
-    @Test func aDetachedHeadShowsALitHeadPill() {
+    @Test func aDetachedHeadShowsAHeadPill() {
         let snapshot = refs(head: .detached("c5"), headCommit: "c5", local: [local("main", at: "c5")])
 
         let pills = RefPill.index(snapshot)["c5"] ?? []

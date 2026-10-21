@@ -201,6 +201,83 @@ struct RefSidebarTests {
         #expect(h.sidebar.selectedNode?.id == h.sidebar.visibleRowIDs.last)
     }
 
+    @Test func theHeadBranchShowsAnInkCheckmarkAndSectionsCarryTheirTopMargin() async throws {
+        let h = try await makeHarness()
+        defer { cleanUp(h) }
+        let outline = h.sidebar.outlineView
+        func cell(_ id: String) throws -> SidebarCellView {
+            let row = try #require(h.sidebar.row(forID: id))
+            let item = try #require(outline.item(atRow: row))
+            return try #require(outline.delegate?.outlineView?(outline, viewFor: outline.outlineTableColumn, item: item) as? SidebarCellView)
+        }
+        let head = try cell("ref:refs/heads/main")
+        let section = try cell("section:local")
+
+        #expect(head.iconName == "checkmark")
+        let headFont = head.textField?.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        let traits = headFont?.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        let weight = traits?[.weight] as? CGFloat ?? 0
+        #expect(weight >= NSFont.Weight.semibold.rawValue - 0.01, "HEAD title is Semibold")
+        #expect(section.titleText == "LOCAL", "sections are eyebrows")
+        #expect(section.iconName == nil)
+        #expect(section.isExpanded)
+
+        let localRow = try #require(h.sidebar.row(forID: "section:local"))
+        let tagsRow = try #require(h.sidebar.row(forID: "section:tags"))
+        let mainRow = try #require(h.sidebar.row(forID: "ref:refs/heads/main"))
+        #expect(outline.rect(ofRow: localRow).height == RefSidebarViewController.rowHeight + 2)
+        #expect(outline.rect(ofRow: tagsRow).height == RefSidebarViewController.rowHeight + 8)
+        #expect(outline.rect(ofRow: mainRow).height == RefSidebarViewController.rowHeight)
+        #expect(SidebarCellView.indent(level: 0) == 8)
+        #expect(SidebarCellView.indent(level: 1) == 12)
+        #expect(SidebarCellView.indent(level: 2) == 30)
+    }
+
+    @Test func theChevronExpandsAndCollapsesFoldersAndSections() async throws {
+        let h = try await makeHarness()
+        defer { cleanUp(h) }
+        let outline = h.sidebar.outlineView
+        func pressChevron(_ id: String) throws {
+            let row = try #require(h.sidebar.row(forID: id))
+            let item = try #require(outline.item(atRow: row))
+            let cell = try #require(outline.delegate?.outlineView?(outline, viewFor: outline.outlineTableColumn, item: item) as? SidebarCellView)
+            cell.disclosureButton.performClick(nil)
+        }
+
+        try pressChevron("folder:local:feature")
+        #expect(h.sidebar.visibleRowIDs.contains("ref:refs/heads/feature/login"), "folder expands")
+        try pressChevron("folder:local:feature")
+        #expect(!h.sidebar.visibleRowIDs.contains("ref:refs/heads/feature/login"), "folder collapses")
+
+        try pressChevron("section:tags")
+        #expect(!h.sidebar.visibleRowIDs.contains("ref:refs/tags/v1.0"), "section collapses")
+        try pressChevron("section:tags")
+        #expect(h.sidebar.visibleRowIDs.contains("ref:refs/tags/v1.0"), "section expands")
+    }
+
+    @Test func sectionRowPillsAlignToTheEyebrowBelowTheTopMargin() async throws {
+        let h = try await makeHarness()
+        defer { cleanUp(h) }
+        let outline = h.sidebar.outlineView
+        func rowView(_ id: String) throws -> ListRowView {
+            let row = try #require(h.sidebar.row(forID: id))
+            let item = try #require(outline.item(atRow: row))
+            let view = try #require(outline.delegate?.outlineView?(outline, rowViewForItem: item) as? ListRowView)
+            view.frame = outline.rect(ofRow: row)
+            return view
+        }
+        let tags = try rowView("section:tags")
+        let main = try rowView("ref:refs/heads/main")
+
+        #expect(tags.contentHeight == RefSidebarViewController.rowHeight)
+        #expect(main.contentHeight == nil)
+        let inset = ListRowView.pillVerticalInset
+        #expect(tags.pillRect.height == RefSidebarViewController.rowHeight - 2 * inset)
+        let bottomEdge = tags.isFlipped ? tags.bounds.maxY - tags.pillRect.maxY : tags.pillRect.minY - tags.bounds.minY
+        #expect(bottomEdge == inset, "pill sits on the bottom 24 pt, below the 8 pt margin")
+        #expect(main.pillRect.height == main.bounds.height - 2 * inset)
+    }
+
     @Test func sidebarCommandsMatchTheBindingTable() {
         let commands = SidebarCommands.all
         #expect(commands.map(\.id) == ["sidebar.filter", "sidebar.focusFilter", "sidebar.next", "sidebar.previous", "sidebar.activate", "sidebar.toggle"])

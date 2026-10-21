@@ -5,13 +5,15 @@ struct ShortcutEntry: Equatable {
     var id: String
     var title: String
     var category: CommandCategory
-    var keys: [String]
+    /// Each chord's K1 keycaps (`KeyChord.keycaps(prefixKey:)`).
+    var keys: [[String]]
 
     /// Case-insensitive substring match on title, id, category and key text.
     func matches(_ query: String) -> Bool {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !needle.isEmpty else { return true }
-        return ([title, id, category.rawValue] + keys).contains { $0.lowercased().contains(needle) }
+        let keyTexts = keys.map { $0.joined(separator: " ") }
+        return ([title, id, category.rawValue] + keyTexts).contains { $0.lowercased().contains(needle) }
     }
 }
 
@@ -30,7 +32,7 @@ enum ShortcutSheetModel {
                 id: command.id,
                 title: command.title,
                 category: command.category,
-                keys: keymap.chords(for: command.id).map { $0.compactText(prefixKey: keymap.prefixKey) }
+                keys: keymap.chords(for: command.id).map { $0.keycaps(prefixKey: keymap.prefixKey) }
             )
         }
         .filter { $0.matches(query) }
@@ -41,26 +43,35 @@ enum ShortcutSheetModel {
     }
 }
 
-/// `help.shortcuts`: a Mission Control panel listing every command and its
-/// chords by category, with type-to-filter; Esc closes.
+/// `help.shortcuts`: a floating panel listing every command and its chords by
+/// category, with type-to-filter; Esc closes. A raised 720×560 surface with a
+/// 12 pt radius and the e3 shadow, New York screen title, search field,
+/// eyebrow sections and one K1 keycap group per chord.
 @MainActor
 final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
+    /// Size of the visible surface; the window adds the shadow margin.
     static let size = NSSize(width: 720, height: 560)
 
-    private let root = NSView()
-    private let stripe = RetroStripeView(layout: .slanted)
+    private let root = FloatingSurfaceView(radius: Chrome.Radius.panel)
     private let titleLabel = NSTextField(labelWithString: "")
-    private let headerRule = RetroRuleView(axis: .horizontal, style: .double)
-    private var search: RetroSearchField!
+    private var search: SearchField!
     private let scrollView = NSScrollView()
     private let listStack = NSStackView()
-    private let footerLabel = NSTextField(labelWithString: "")
+    private let footerRule = ChromeRuleView(axis: .horizontal, color: .clear)
+    private var footerHints: HintsView!
+    private let footerNote = NSTextField(labelWithString: "")
     private var theme: AppTheme
 
     init() {
         theme = ThemeCenter.shared.theme
         super.init(
-            contentRect: NSRect(origin: .zero, size: Self.size),
+            contentRect: NSRect(
+                origin: .zero,
+                size: NSSize(
+                    width: Self.size.width + FloatingSurfaceView.horizontalMargin,
+                    height: Self.size.height + FloatingSurfaceView.verticalMargin
+                )
+            ),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -69,13 +80,25 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
         level = .floating
         backgroundColor = .clear
         isOpaque = false
-        hasShadow = true
+        // The surface layer draws the e3 shadow inside the transparent margin.
+        hasShadow = false
         isReleasedWhenClosed = false
         hidesOnDeactivate = true
         animationBehavior = .utilityWindow
-        appearance = NSAppearance(named: .darkAqua)
         contentView = root
         build()
+        // A macOS light/dark flip (folio) re-themes an open sheet too.
+        ThemeCenter.shared.addObserver(self) { [weak self] theme in
+            guard let self, self.isVisible else { return }
+            self.apply(theme: theme)
+        }
+    }
+
+    /// Re-themes the panel and its rows.
+    func apply(theme: AppTheme) {
+        self.theme = theme
+        applyTheme()
+        reload()
     }
 
     @available(*, unavailable)
@@ -95,11 +118,11 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
     }
 
     private func build() {
-        search = RetroSearchField(placeholder: "Filter commands, ids or keys...", theme: theme)
+        search = SearchField(placeholder: "Filter commands, ids or keys", theme: theme)
         search.field.delegate = self
-
-        root.wantsLayer = true
-        root.layer?.borderWidth = Retro.hairline
+        footerHints = HintsView(hints: [HintsView.Hint(caps: [["esc"]], label: "Close")], theme: theme)
+        footerNote.lineBreakMode = .byTruncatingTail
+        footerNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -111,67 +134,65 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
         scrollView.documentView = document
         listStack.orientation = .vertical
         listStack.alignment = .leading
-        listStack.spacing = 4
+        listStack.spacing = 2
         listStack.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(listStack)
 
-        for view in [stripe, titleLabel, headerRule, search, scrollView, footerLabel] as [NSView] {
+        let surface = root.surface
+        for view in [titleLabel, search, scrollView, footerRule, footerHints, footerNote] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
-            root.addSubview(view)
+            surface.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            stripe.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            stripe.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            stripe.widthAnchor.constraint(equalToConstant: 22),
-            stripe.heightAnchor.constraint(equalToConstant: 12),
-            titleLabel.leadingAnchor.constraint(equalTo: stripe.trailingAnchor, constant: 10),
-            titleLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
-            headerRule.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            headerRule.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            headerRule.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
-            search.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            search.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -18),
-            search.topAnchor.constraint(equalTo: headerRule.bottomAnchor, constant: 12),
-            scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            surface.widthAnchor.constraint(equalToConstant: Self.size.width),
+            surface.heightAnchor.constraint(equalToConstant: Self.size.height),
+            titleLabel.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: surface.trailingAnchor, constant: -20),
+            titleLabel.topAnchor.constraint(equalTo: surface.topAnchor, constant: 18),
+            search.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
+            search.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -20),
+            search.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 14),
+            scrollView.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 10),
-            scrollView.bottomAnchor.constraint(equalTo: footerLabel.topAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: footerRule.topAnchor),
             document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
             document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
             document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
-            listStack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 18),
-            listStack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -18),
-            listStack.topAnchor.constraint(equalTo: document.topAnchor, constant: 4),
-            listStack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -8),
-            footerLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 18),
-            footerLabel.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -10),
+            listStack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 20),
+            listStack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -20),
+            listStack.topAnchor.constraint(equalTo: document.topAnchor, constant: 8),
+            listStack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -12),
+            footerRule.leadingAnchor.constraint(equalTo: surface.leadingAnchor),
+            footerRule.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
+            footerRule.bottomAnchor.constraint(equalTo: surface.bottomAnchor, constant: -32),
+            footerHints.leadingAnchor.constraint(equalTo: surface.leadingAnchor, constant: 20),
+            footerHints.centerYAnchor.constraint(equalTo: surface.bottomAnchor, constant: -16),
+            footerNote.leadingAnchor.constraint(greaterThanOrEqualTo: footerHints.trailingAnchor, constant: 14),
+            footerNote.trailingAnchor.constraint(equalTo: surface.trailingAnchor, constant: -20),
+            footerNote.centerYAnchor.constraint(equalTo: footerHints.centerYAnchor),
         ])
         applyTheme()
     }
 
     private func applyTheme() {
         let colors = theme.colors
-        root.layer?.backgroundColor = colors.bgPanel.withAlphaComponent(0.985).cgColor
-        root.layer?.borderColor = colors.borderStrong.cgColor
-        stripe.colors = colors.stripe
-        titleLabel.setRetroText("Keyboard Shortcuts", color: colors.accent, glow: true)
-        headerRule.color = colors.borderStrong
+        appearance = theme.appearance.nsAppearance
+        root.apply(theme: theme)
+        titleLabel.setChromeText("Keyboard Shortcuts", font: ChromeFont.screen, color: colors.textPrimary, tracking: -0.2)
         search.apply(theme: theme)
-        footerLabel.setRetroText(
-            "Type  Filter    esc  Close    rebind in settings.json → keybindings.bindings",
-            color: colors.textMuted
-        )
+        footerRule.color = colors.borderSubtle
+        footerHints.apply(theme: theme)
+        footerNote.setChromeText("Rebind in Settings → Keyboard or settings.json", font: ChromeFont.meta, color: colors.textMuted)
     }
 
     func show(relativeTo parent: NSWindow) {
-        theme = ThemeCenter.shared.theme
-        applyTheme()
         search.field.stringValue = ""
-        reload()
+        apply(theme: ThemeCenter.shared.theme)
         let parentFrame = parent.frame
         setFrameOrigin(NSPoint(
-            x: parentFrame.midX - Self.size.width / 2,
-            y: max(parentFrame.minY + 12, parentFrame.maxY - Self.size.height - 72)
+            x: parentFrame.midX - frame.width / 2,
+            y: max(parentFrame.minY + 12, parentFrame.maxY - frame.height - 72 + FloatingSurfaceView.margins.top)
         ))
         if let current = self.parent, current !== parent {
             current.removeChildWindow(self)
@@ -234,15 +255,15 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
         let colors = theme.colors
         if sections.isEmpty {
             let empty = NSTextField(labelWithString: "")
-            empty.setRetroText("No matching commands", color: colors.textMuted)
+            empty.setChromeText("No matching commands", font: ChromeFont.empty, color: colors.textMuted)
             listStack.addArrangedSubview(empty)
         }
         for (index, section) in sections.enumerated() {
-            let heading = RetroHeadingView(title: section.category.rawValue, theme: theme, accented: true)
+            let heading = ChromeEyebrowView(title: section.category.rawValue, theme: theme)
             listStack.addArrangedSubview(heading)
             heading.widthAnchor.constraint(equalTo: listStack.widthAnchor).isActive = true
             if index > 0 {
-                listStack.setCustomSpacing(14, after: listStack.arrangedSubviews[listStack.arrangedSubviews.count - 2])
+                listStack.setCustomSpacing(16, after: listStack.arrangedSubviews[listStack.arrangedSubviews.count - 2])
             }
             listStack.setCustomSpacing(6, after: heading)
             for entry in section.entries {
@@ -256,27 +277,35 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
     }
 }
 
-private final class ShortcutRow: NSView {
+/// One command: title (SF Pro 12), id (SF Mono 11 muted) and one K1 keycap
+/// group per chord.
+final class ShortcutRow: NSView {
+    /// One group per chord, in order (tests).
+    private(set) var keycapGroups: [ChromeKeycapGroupView] = []
+
     init(entry: ShortcutEntry, theme: AppTheme) {
         super.init(frame: .zero)
         let colors = theme.colors
-        let title = NSTextField(labelWithString: entry.title)
-        title.font = RetroFont.body(12)
-        title.textColor = colors.textPrimary
+        let title = NSTextField(labelWithString: "")
         title.lineBreakMode = .byTruncatingTail
-        let id = NSTextField(labelWithString: entry.id)
-        id.font = RetroFont.body(10)
-        id.textColor = colors.textMuted
+        title.setChromeText(entry.title, font: ChromeFont.label, color: colors.textPrimary)
+        let id = NSTextField(labelWithString: "")
+        id.lineBreakMode = .byTruncatingTail
+        id.setChromeText(entry.id, font: ChromeFont.monoSmall, color: colors.textMuted)
         id.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let keys = NSStackView()
-        keys.spacing = 4
+        keys.orientation = .horizontal
+        keys.alignment = .centerY
+        keys.spacing = 6
         if entry.keys.isEmpty {
             let none = NSTextField(labelWithString: "")
-            none.setRetroText("—", color: colors.textMuted)
+            none.setChromeText("—", font: ChromeFont.meta, color: colors.textMuted)
             keys.addArrangedSubview(none)
         } else {
-            for key in entry.keys {
-                keys.addArrangedSubview(KeycapView(text: key, theme: theme))
+            for caps in entry.keys {
+                let group = ChromeKeycapGroupView(caps: caps, theme: theme)
+                keycapGroups.append(group)
+                keys.addArrangedSubview(group)
             }
         }
         keys.setContentHuggingPriority(.required, for: .horizontal)
@@ -285,7 +314,7 @@ private final class ShortcutRow: NSView {
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 22),
+            heightAnchor.constraint(equalToConstant: 24),
             title.leadingAnchor.constraint(equalTo: leadingAnchor),
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
             title.widthAnchor.constraint(equalToConstant: 260),

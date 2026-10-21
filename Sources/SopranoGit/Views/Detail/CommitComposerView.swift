@@ -1,8 +1,10 @@
 import AppKit
 import SopranoGitCore
 
-/// The commit composer pinned under the working-copy file list: summary with
-/// a character counter, description, AMEND, COMMIT and STAGE ALL & COMMIT.
+/// The commit composer pinned under the working-copy file list: a `COMMIT
+/// MESSAGE` eyebrow with the Amend checkbox, the summary with a character
+/// counter and the description in raised fields, then the ink Commit button
+/// and the standard Stage all & commit button.
 final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate {
     static let inset: CGFloat = 12
     static let minimumDescriptionLines = 4
@@ -14,13 +16,14 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
     var onTextChange: (() -> Void)?
 
     private var theme: AppTheme
-    private let topRule = NSView()
-    private let heading: RetroHeadingView
-    let amendCheckbox: RetroCheckbox
-    private let summaryBox = NSView()
-    let summaryField = NSTextField()
+    private let topRule = ChromeRuleView(axis: .horizontal)
+    private let heading: ChromeEyebrowView
+    let amendCheckbox: ChromeCheckbox
+    let amendLabel = NSTextField(labelWithString: "")
+    let summaryBox: ChromeFieldView
+    let summaryField = FocusReportingTextField()
     private let counterLabel = NSTextField(labelWithString: "")
-    private let descriptionBox = NSView()
+    private let descriptionBox: ChromeFieldView
     private let descriptionScroll = NSScrollView()
     let descriptionView = PlaceholderTextView()
     private var descriptionHeight: NSLayoutConstraint!
@@ -32,10 +35,12 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
 
     init(theme: AppTheme) {
         self.theme = theme
-        heading = RetroHeadingView(title: "Commit message", theme: theme)
-        amendCheckbox = RetroCheckbox(title: "Amend", theme: theme, target: nil, action: nil)
-        commitButton = KeyHintButton(title: "Commit", hint: nil, theme: theme, kind: .prominent, height: 28)
-        stageAllButton = KeyHintButton(title: "Stage all & commit", hint: nil, theme: theme, kind: .standard, height: 24)
+        heading = ChromeEyebrowView(title: "Commit message", theme: theme)
+        amendCheckbox = ChromeCheckbox(theme: theme)
+        summaryBox = ChromeFieldView(theme: theme)
+        descriptionBox = ChromeFieldView(theme: theme)
+        commitButton = KeyHintButton(title: "Commit", hint: nil, theme: theme, kind: .ink, height: Chrome.controlHeight)
+        stageAllButton = KeyHintButton(title: "Stage all & commit", hint: nil, theme: theme, kind: .standard, height: Chrome.controlHeight)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -69,8 +74,17 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
     var hasSummary: Bool { !summary.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var isAmending: Bool {
-        get { amendCheckbox.isOn }
-        set { amendCheckbox.isOn = newValue }
+        get { amendCheckbox.isChecked }
+        set { amendCheckbox.isChecked = newValue }
+    }
+
+    /// Amend needs a HEAD commit; the label dims with the checkbox.
+    var isAmendEnabled: Bool {
+        get { amendCheckbox.isEnabled }
+        set {
+            amendCheckbox.isEnabled = newValue
+            amendLabel.alphaValue = newValue ? 1 : 0.45
+        }
     }
 
     var hintText: String? { hintLabel.isHidden ? nil : hintLabel.stringValue }
@@ -86,7 +100,7 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
     func clear() {
         summaryField.stringValue = ""
         descriptionView.string = ""
-        amendCheckbox.isOn = false
+        amendCheckbox.isChecked = false
         textChanged()
     }
 
@@ -100,13 +114,13 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
         commitButton.title = state.commitTitle
         commitButton.isEnabled = state.canCommit
         stageAllButton.isEnabled = state.canStageAllAndCommit
-        commitButton.hint = PanelText.keycap("wip.commit")
-        stageAllButton.hint = PanelText.keycap("wip.stageAllAndCommit")
+        commitButton.hint = SettingsCenter.shared.keycaps(for: "wip.commit")
+        stageAllButton.hint = SettingsCenter.shared.keycaps(for: "wip.stageAllAndCommit")
         if let hint = state.hint {
             hintLabel.attributedStringValue = NSAttributedString(
                 string: hint,
                 attributes: [
-                    .font: RetroFont.body(11),
+                    .font: ChromeFont.meta,
                     .foregroundColor: state.conflictCount > 0 ? theme.colors.danger : theme.colors.textMuted,
                 ]
             )
@@ -121,20 +135,16 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
     // MARK: - Building
 
     private func build() {
-        topRule.wantsLayer = true
-        summaryBox.wantsLayer = true
-        descriptionBox.wantsLayer = true
-
-        summaryField.isBordered = false
-        summaryField.isBezeled = false
-        summaryField.drawsBackground = false
-        summaryField.focusRingType = .none
-        summaryField.font = RetroFont.body(12)
         summaryField.usesSingleLineMode = true
         summaryField.lineBreakMode = .byTruncatingTail
         summaryField.cell?.isScrollable = true
         summaryField.cell?.wraps = false
         summaryField.delegate = self
+        summaryField.onFocusChange = { [weak self] focused in
+            guard let self else { return }
+            summaryBox.isFocused = focused
+            if focused { ChromeFieldView.styleEditor(of: summaryField, colors: theme.colors) }
+        }
         summaryField.setAccessibilityLabel("Commit summary")
         counterLabel.alignment = .right
         counterLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -142,7 +152,7 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
 
         descriptionView.isRichText = false
         descriptionView.allowsUndo = true
-        descriptionView.font = RetroFont.body(12)
+        descriptionView.font = ChromeFont.label
         descriptionView.drawsBackground = false
         descriptionView.textContainerInset = NSSize(width: 4, height: 5)
         descriptionView.isVerticallyResizable = true
@@ -155,6 +165,7 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
         descriptionView.isAutomaticSpellingCorrectionEnabled = false
         descriptionView.delegate = self
         descriptionView.placeholder = "Description"
+        descriptionView.onFocusChange = { [weak self] focused in self?.descriptionBox.isFocused = focused }
         descriptionView.setAccessibilityLabel("Commit description")
         descriptionScroll.documentView = descriptionView
         descriptionScroll.drawsBackground = false
@@ -166,12 +177,15 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
         amendCheckbox.target = self
         amendCheckbox.action = #selector(amendToggled)
         amendCheckbox.toolTip = "Amend the last commit"
+        amendCheckbox.setAccessibilityLabel("Amend")
+        amendLabel.toolTip = amendCheckbox.toolTip
+        amendLabel.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(amendLabelClicked)))
         commitButton.target = self
         commitButton.action = #selector(commitClicked)
         stageAllButton.target = self
         stageAllButton.action = #selector(stageAllClicked)
 
-        for view in [topRule, heading, amendCheckbox, summaryBox, descriptionBox, hintLabel, commitButton, stageAllButton] as [NSView] {
+        for view in [topRule, heading, amendCheckbox, amendLabel, summaryBox, descriptionBox, hintLabel, commitButton, stageAllButton] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -189,18 +203,19 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
             topRule.leadingAnchor.constraint(equalTo: leadingAnchor),
             topRule.trailingAnchor.constraint(equalTo: trailingAnchor),
             topRule.topAnchor.constraint(equalTo: topAnchor),
-            topRule.heightAnchor.constraint(equalToConstant: Retro.hairline),
 
             heading.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             heading.topAnchor.constraint(equalTo: topRule.bottomAnchor, constant: 10),
-            amendCheckbox.leadingAnchor.constraint(equalTo: heading.trailingAnchor, constant: 10),
-            amendCheckbox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            amendCheckbox.leadingAnchor.constraint(greaterThanOrEqualTo: heading.trailingAnchor, constant: 10),
             amendCheckbox.centerYAnchor.constraint(equalTo: heading.centerYAnchor),
+            amendLabel.leadingAnchor.constraint(equalTo: amendCheckbox.trailingAnchor, constant: 6),
+            amendLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            amendLabel.centerYAnchor.constraint(equalTo: amendCheckbox.centerYAnchor),
 
             summaryBox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
             summaryBox.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
             summaryBox.topAnchor.constraint(equalTo: heading.bottomAnchor, constant: 8),
-            summaryBox.heightAnchor.constraint(equalToConstant: 26),
+            summaryBox.heightAnchor.constraint(equalToConstant: Chrome.fieldHeight),
             summaryField.leadingAnchor.constraint(equalTo: summaryBox.leadingAnchor, constant: 8),
             summaryField.centerYAnchor.constraint(equalTo: summaryBox.centerYAnchor),
             counterLabel.leadingAnchor.constraint(equalTo: summaryField.trailingAnchor, constant: 6),
@@ -245,41 +260,37 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
         self.theme = theme
         let colors = theme.colors
         layer?.backgroundColor = colors.bgPanel.cgColor
-        topRule.layer?.backgroundColor = colors.borderSubtle.cgColor
+        topRule.color = colors.borderSubtle
         heading.apply(theme: theme)
         amendCheckbox.apply(theme: theme)
+        amendLabel.setChromeText("Amend", color: colors.textPrimary)
         commitButton.apply(theme: theme)
         stageAllButton.apply(theme: theme)
-        for box in [summaryBox, descriptionBox] {
-            box.layer?.backgroundColor = colors.bgRaised.cgColor
-            box.layer?.borderColor = colors.borderStrong.cgColor
-            box.layer?.borderWidth = 1
-            box.layer?.cornerRadius = 0
-        }
-        summaryField.textColor = colors.textPrimary
+        summaryBox.apply(theme: theme)
+        descriptionBox.apply(theme: theme)
+        ChromeFieldView.styleEmbedded(summaryField, colors: colors)
         summaryField.placeholderAttributedString = NSAttributedString(
             string: "Summary",
-            attributes: [.font: RetroFont.body(12), .foregroundColor: colors.textMuted]
+            attributes: [.font: ChromeFont.label, .foregroundColor: colors.textMuted]
         )
         descriptionView.textColor = colors.textPrimary
-        descriptionView.insertionPointColor = colors.accent
+        descriptionView.insertionPointColor = colors.caret
         descriptionView.placeholderColor = colors.textMuted
-        descriptionView.selectedTextAttributes = [.backgroundColor: colors.bgSelectedStrong]
-        (summaryField.currentEditor() as? NSTextView)?.insertionPointColor = colors.accent
+        descriptionView.selectedTextAttributes = [.backgroundColor: colors.textSelection]
+        ChromeFieldView.styleEditor(of: summaryField, colors: colors)
         updateCounter()
         update(state: state)
     }
 
     private func descriptionHeight(lines: Int) -> CGFloat {
-        let font = RetroFont.body(12)
-        let lineHeight = ceil(NSLayoutManager().defaultLineHeight(for: font))
+        let lineHeight = ceil(NSLayoutManager().defaultLineHeight(for: ChromeFont.label))
         return CGFloat(lines) * lineHeight + descriptionView.textContainerInset.height * 2 + 2
     }
 
     private func updateDescriptionHeight() {
         guard let layoutManager = descriptionView.layoutManager, let container = descriptionView.textContainer else { return }
         layoutManager.ensureLayout(for: container)
-        let lineHeight = ceil(layoutManager.defaultLineHeight(for: RetroFont.body(12)))
+        let lineHeight = ceil(layoutManager.defaultLineHeight(for: ChromeFont.label))
         let lines = Int(ceil(layoutManager.usedRect(for: container).height / max(lineHeight, 1)))
         let clamped = min(max(lines, Self.minimumDescriptionLines), Self.maximumDescriptionLines)
         let height = descriptionHeight(lines: clamped)
@@ -292,7 +303,7 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
         let color: NSColor = count > CommitMessage.summaryLimit ? colors.danger : colors.textMuted
         counterLabel.attributedStringValue = NSAttributedString(
             string: count > CommitMessage.summaryLimit ? "\(count)/\(CommitMessage.summaryLimit)" : "\(count)",
-            attributes: [.font: RetroFont.body(11), .foregroundColor: color]
+            attributes: [.font: ChromeFont.count, .foregroundColor: color]
         )
         counterLabel.toolTip = count > CommitMessage.summaryLimit ? "Summaries read best under \(CommitMessage.summaryLimit) characters" : nil
     }
@@ -326,7 +337,14 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
     }
 
     @objc private func amendToggled() {
-        onAmendToggled?(amendCheckbox.isOn)
+        onAmendToggled?(amendCheckbox.isChecked)
+    }
+
+    /// The label toggles the checkbox like a native checkbox title.
+    @objc private func amendLabelClicked() {
+        guard amendCheckbox.isEnabled else { return }
+        amendCheckbox.isChecked.toggle()
+        amendToggled()
     }
 
     @objc private func commitClicked() {
@@ -344,6 +362,9 @@ final class PlaceholderTextView: NSTextView {
         didSet { needsDisplay = true }
     }
 
+    /// Called with true on becoming first responder, false on resigning.
+    var onFocusChange: ((Bool) -> Void)?
+
     var placeholderColor: NSColor = .placeholderTextColor {
         didSet { needsDisplay = true }
     }
@@ -355,12 +376,20 @@ final class PlaceholderTextView: NSTextView {
         let origin = NSPoint(x: textContainerInset.width + padding, y: textContainerInset.height)
         NSAttributedString(
             string: placeholder,
-            attributes: [.font: font ?? RetroFont.body(12), .foregroundColor: placeholderColor]
+            attributes: [.font: font ?? ChromeFont.label, .foregroundColor: placeholderColor]
         ).draw(at: origin)
     }
 
     override func becomeFirstResponder() -> Bool {
         needsDisplay = true
-        return super.becomeFirstResponder()
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { onFocusChange?(false) }
+        return resigned
     }
 }

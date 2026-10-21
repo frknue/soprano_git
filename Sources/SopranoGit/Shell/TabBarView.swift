@@ -1,12 +1,15 @@
 import AppKit
 
-/// Repository tabs in the titlebar area (Soprano's `WindowTabBarView` look):
-/// 78 pt inset for the traffic lights, selected tab = accent block with
-/// `bgPanel` ink, others muted with hairline separators, `+` at the end.
+/// Repository tabs in the 36 pt titlebar strip on `bgPanel`: a 78 pt inset for
+/// the traffic lights, 24 pt tab pills 4 pt apart (`1  soprano`, index muted),
+/// the selected one raised with a `borderSubtle` edge and ink Medium title,
+/// a `hover` pill under the pointer, then `+`. One hairline closes it below.
 @MainActor
 final class TabBarView: NSView {
-    static let height: CGFloat = 34
+    static let height: CGFloat = 36
     static let trafficLightInset: CGFloat = 78
+    static let tabHeight: CGFloat = Chrome.controlHeight
+    static let tabSpacing: CGFloat = 4
 
     struct Item: Equatable {
         var title: String
@@ -18,8 +21,8 @@ final class TabBarView: NSView {
     var onAdd: (() -> Void)?
 
     private var buttons: [TabButton] = []
-    private let addButton = NSButton(title: "+", target: nil, action: nil)
-    private let bottomRule = RetroRuleView(axis: .horizontal, style: .single)
+    private let addButton = NSButton(title: "", target: nil, action: nil)
+    private let bottomRule = ChromeRuleView(axis: .horizontal)
     private var items: [Item] = []
     private var selectedIndex = 0
     private var theme: AppTheme
@@ -29,6 +32,9 @@ final class TabBarView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         addButton.isBordered = false
+        addButton.imagePosition = .imageOnly
+        addButton.image = NSImage(systemSymbolName: "plus", accessibilityDescription: "New Tab")?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
         addButton.refusesFirstResponder = true
         addButton.target = self
         addButton.action = #selector(addClicked)
@@ -49,9 +55,9 @@ final class TabBarView: NSView {
 
     func apply(theme: AppTheme) {
         self.theme = theme
-        layer?.backgroundColor = theme.colors.bgBase.cgColor
+        layer?.backgroundColor = theme.colors.bgPanel.cgColor
         bottomRule.color = theme.colors.borderSubtle
-        addButton.attributedTitle = RetroText.display("+", color: theme.colors.textMuted, size: 22)
+        addButton.contentTintColor = theme.colors.textMuted
         reloadButtons()
     }
 
@@ -77,26 +83,25 @@ final class TabBarView: NSView {
             buttons.append(button)
         }
         for (index, item) in items.enumerated() {
-            buttons[index].configure(
-                number: index + 1,
-                item: item,
-                isSelected: index == selectedIndex,
-                showsSeparator: index != selectedIndex && index + 1 != selectedIndex,
-                theme: theme
-            )
+            buttons[index].configure(number: index + 1, item: item, isSelected: index == selectedIndex, theme: theme)
         }
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
+        // Content centres in the strip above the bottom hairline.
+        let midY = Chrome.hairline + (bounds.height - Chrome.hairline) / 2
         var x = Self.trafficLightInset
         for button in buttons {
-            button.frame = NSRect(x: x, y: 0, width: button.tabWidth, height: bounds.height - Retro.hairline)
-            x += button.tabWidth
+            button.frame = NSRect(x: x, y: floor(midY - Self.tabHeight / 2), width: button.tabWidth, height: Self.tabHeight)
+            x += button.tabWidth + Self.tabSpacing
         }
-        addButton.frame = NSRect(x: x + 4, y: 1, width: 28, height: bounds.height - 2)
-        bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: Retro.hairline)
+        // `+` sits 4 pt further out than the tab gap.
+        let addSize = Chrome.iconButtonSize
+        let glyphInset = floor((addSize - 14) / 2)
+        addButton.frame = NSRect(x: x + 4 - glyphInset, y: floor(midY - addSize / 2), width: addSize, height: addSize)
+        bottomRule.frame = NSRect(x: 0, y: 0, width: bounds.width, height: Chrome.hairline)
     }
 
     @objc private func tabClicked(_ sender: TabButton) {
@@ -109,20 +114,32 @@ final class TabBarView: NSView {
     }
 }
 
+/// One tab pill: `1  soprano` in SF Pro 12, padding 0 12 0 10.
 private final class TabButton: NSButton {
+    static let leadingPadding: CGFloat = 10
+    static let trailingPadding: CGFloat = 12
+    static let maxWidth: CGFloat = 240
+
     var onMiddleClick: (() -> Void)?
     private(set) var tabWidth: CGFloat = 120
-    private let separator = NSView()
+    private var isSelectedTab = false
+    private var label = NSAttributedString()
+    private var colors: ThemeColors?
+    private var hoverArea: NSTrackingArea?
+    private var isHovered = false {
+        didSet {
+            guard isHovered != oldValue else { return }
+            needsDisplay = true
+        }
+    }
 
     init() {
         super.init(frame: .zero)
         isBordered = false
         refusesFirstResponder = true
-        wantsLayer = true
+        title = ""
         setButtonType(.momentaryChange)
         (cell as? NSButtonCell)?.highlightsBy = []
-        separator.wantsLayer = true
-        addSubview(separator)
         setAccessibilityRole(.radioButton)
     }
 
@@ -131,28 +148,62 @@ private final class TabButton: NSButton {
         fatalError("init(coder:) is not supported")
     }
 
-    func configure(number: Int, item: TabBarView.Item, isSelected: Bool, showsSeparator: Bool, theme: AppTheme) {
+    func configure(number: Int, item: TabBarView.Item, isSelected: Bool, theme: AppTheme) {
         let colors = theme.colors
-        let text = "\(number):\(item.title)"
-        attributedTitle = RetroText.display(
-            text,
-            color: isSelected ? colors.bgPanel : colors.textMuted,
-            alignment: .center,
-            lineBreakMode: .byTruncatingTail
-        )
-        tabWidth = min(220, max(88, ceil(attributedTitle.size().width) + 28))
-        layer?.backgroundColor = isSelected ? colors.accent.cgColor : NSColor.clear.cgColor
-        separator.isHidden = !showsSeparator
-        separator.layer?.backgroundColor = colors.borderSubtle.cgColor
+        self.colors = colors
+        isSelectedTab = isSelected
+        let text = NSMutableAttributedString(attributedString: ChromeText.attributed(
+            "\(number)  ",
+            font: ChromeFont.sans(size: 12, tabular: true),
+            color: colors.textMuted
+        ))
+        text.append(ChromeText.attributed(
+            item.title,
+            font: isSelected ? ChromeFont.labelStrong : ChromeFont.label,
+            color: isSelected ? colors.textPrimary : colors.textMuted
+        ))
+        label = text
+        let width = ceil(text.size().width) + Self.leadingPadding + Self.trailingPadding
+        tabWidth = min(Self.maxWidth, width)
         toolTip = item.detail ?? item.title
         setAccessibilityLabel("Tab \(number): \(item.title)")
         setAccessibilityValue(isSelected)
-        needsLayout = true
+        needsDisplay = true
     }
 
-    override func layout() {
-        super.layout()
-        separator.frame = NSRect(x: bounds.maxX - Retro.hairline, y: 9, width: Retro.hairline, height: bounds.height - 18)
+    override func draw(_ dirtyRect: NSRect) {
+        guard let colors else { return }
+        let style: ChromeSelectionPill.Style = isSelectedTab ? .raisedTab : (isHovered ? .hover : .none)
+        ChromeSelectionPill.draw(style, in: bounds, colors: colors, inset: 0)
+        let height = label.size().height
+        let rect = NSRect(
+            x: Self.leadingPadding,
+            y: floor((bounds.height - height) / 2),
+            width: bounds.width - Self.leadingPadding - Self.trailingPadding,
+            height: height
+        )
+        label.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .inVisibleRect, .activeInKeyWindow], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        isHovered = false
     }
 
     override func otherMouseDown(with event: NSEvent) {

@@ -3,7 +3,7 @@ import SopranoGitCore
 
 /// File-list mouse selection. Modified clicks only build the selection; an
 /// unmodified click opens its diff. Keyboard selection remains AppKit-owned.
-final class PanelFileTableView: RetroTableView {
+final class PanelFileTableView: ListTableView {
     var onOpenRow: ((Int) -> Void)?
     private var rangeAnchor: Int?
 
@@ -45,17 +45,20 @@ final class PanelFileTableView: RetroTableView {
 /// A button a file row or section heading offers (stage, discard, ours, …).
 struct PanelRowAction {
     var title: String
-    /// Command whose chord the keycap shows.
+    /// Command whose keycaps the button shows.
     var commandID: String
     var kind: KeyHintButton.Kind = .standard
     var perform: @MainActor () -> Void
 }
 
-/// File row: kind badge, path (directory muted, name bright), `+a −d`, and
-/// action keys that show while the row is hovered or selected.
+/// File row: bare kind letter, path in SF Mono (directory muted, name
+/// Semibold, shortened at a path component), the diffstat, and action keys
+/// that show while the row is hovered or selected.
 final class PanelFileCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("PanelFileCell")
     static let rowHeight: CGFloat = 26
+    /// Content inset from the row edge: the 4 pt pill margin plus 8 pt padding.
+    static let inset: CGFloat = 12
 
     private let badge: ChangeKindBadge
     private let pathLabel = NSTextField(labelWithString: "")
@@ -64,6 +67,9 @@ final class PanelFileCellView: NSTableCellView {
     private var actions: [PanelRowAction] = []
     private var hoverArea: NSTrackingArea?
     private var theme: AppTheme
+    private var file: PanelFile?
+    /// Width the path was last shortened for; nil forces a rebuild.
+    private var pathWidth: CGFloat?
     /// The path ends before the detail text, or before the action keys while they show.
     private var pathBeforeDetail: NSLayoutConstraint!
     private var pathBeforeActions: NSLayoutConstraint!
@@ -79,6 +85,8 @@ final class PanelFileCellView: NSTableCellView {
     /// Whether the action keys are showing (hovered or selected row).
     var showsActions: Bool { !actionStack.isHidden }
     var actionTitles: [String] { actions.map(\.title) }
+    /// The path as displayed, after shortening.
+    var displayedPath: String { pathLabel.stringValue }
 
     init(theme: AppTheme) {
         self.theme = theme
@@ -104,14 +112,14 @@ final class PanelFileCellView: NSTableCellView {
         pathBeforeDetail = detailLabel.leadingAnchor.constraint(greaterThanOrEqualTo: pathLabel.trailingAnchor, constant: 8)
         pathBeforeActions = actionStack.leadingAnchor.constraint(greaterThanOrEqualTo: pathLabel.trailingAnchor, constant: 8)
         NSLayoutConstraint.activate([
-            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            badge.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.inset),
             badge.centerYAnchor.constraint(equalTo: centerYAnchor),
             pathLabel.leadingAnchor.constraint(equalTo: badge.trailingAnchor, constant: 8),
             pathLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -10),
-            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Self.inset),
+            detailLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.inset),
             detailLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            actionStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            actionStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.inset),
             actionStack.centerYAnchor.constraint(equalTo: centerYAnchor),
             pathBeforeDetail,
         ])
@@ -123,22 +131,24 @@ final class PanelFileCellView: NSTableCellView {
     func configure(file: PanelFile, actions: [PanelRowAction], theme: AppTheme, selected: Bool) {
         self.theme = theme
         self.actions = actions
+        self.file = file
         let colors = theme.colors
         badge.apply(theme: theme)
         badge.kind = file.kind
-        pathLabel.attributedStringValue = PanelText.path(file.path, oldPath: file.oldPath, colors: colors)
+        pathWidth = nil
+        updatePath()
         pathLabel.toolTip = file.oldPath.map { "\($0) → \(file.path)" } ?? file.path
         if let conflict = file.conflict {
             detailLabel.attributedStringValue = NSAttributedString(
                 string: Self.describe(conflict),
-                attributes: [.font: RetroFont.body(11), .foregroundColor: colors.danger]
+                attributes: [.font: ChromeFont.meta, .foregroundColor: colors.danger]
             )
         } else if file.section == .files {
             detailLabel.attributedStringValue = PanelText.counts(additions: file.additions, deletions: file.deletions, colors: colors)
         } else if file.isUntracked {
             detailLabel.attributedStringValue = NSAttributedString(
                 string: "new",
-                attributes: [.font: RetroFont.body(11), .foregroundColor: colors.textMuted]
+                attributes: [.font: ChromeFont.meta, .foregroundColor: colors.textMuted]
             )
         } else {
             detailLabel.attributedStringValue = NSAttributedString()
@@ -148,7 +158,12 @@ final class PanelFileCellView: NSTableCellView {
             view.removeFromSuperview()
         }
         for (index, action) in actions.enumerated() {
-            let button = KeyHintButton(title: action.title, hint: PanelText.keycap(action.commandID), theme: theme, kind: action.kind)
+            let button = KeyHintButton(
+                title: action.title,
+                hint: SettingsCenter.shared.keycaps(for: action.commandID),
+                theme: theme,
+                kind: action.kind
+            )
             button.tag = index
             button.target = self
             button.action = #selector(runAction(_:))
@@ -182,6 +197,36 @@ final class PanelFileCellView: NSTableCellView {
         detailLabel.isHidden = show
         pathBeforeDetail.isActive = !show
         pathBeforeActions.isActive = show
+        needsLayout = true
+    }
+
+    /// Room for the path between the kind letter and the trailing detail or
+    /// actions, less the label cell's own text insets.
+    private var availablePathWidth: CGFloat? {
+        guard bounds.width > 0 else { return nil }
+        let end: CGFloat
+        if !actionStack.isHidden {
+            end = bounds.width - Self.inset - actionStack.fittingSize.width - 8
+        } else if detailLabel.attributedStringValue.length > 0 {
+            end = bounds.width - Self.inset - detailLabel.intrinsicContentSize.width - 8
+        } else {
+            end = bounds.width - Self.inset
+        }
+        let start = Self.inset + badge.intrinsicContentSize.width + 8
+        return max(0, floor(end - start) - 4)
+    }
+
+    private func updatePath() {
+        guard let file else { return }
+        let width = availablePathWidth
+        guard width == nil || width != pathWidth else { return }
+        pathWidth = width
+        pathLabel.attributedStringValue = PanelText.path(file.path, oldPath: file.oldPath, colors: theme.colors, availableWidth: width)
+    }
+
+    override func layout() {
+        updatePath()
+        super.layout()
     }
 
     override func updateTrackingAreas() {
@@ -206,41 +251,48 @@ final class PanelFileCellView: NSTableCellView {
     }
 }
 
-/// Section heading with always-visible actions; shortcut hints hide when space is tight.
+/// Section heading: an eyebrow with its count, no rule, and always-visible
+/// plain actions whose keycaps hide when space is tight.
 final class PanelSectionCellView: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("PanelSectionCell")
-    static let rowHeight: CGFloat = 30
+    /// Space above the 28 pt heading that separates it from the rows before.
+    static let topMargin: CGFloat = 6
+    static let headingHeight: CGFloat = 28
+    static let rowHeight: CGFloat = topMargin + headingHeight
 
     private let titleLabel = NSTextField(labelWithString: "")
-    private let rule = RetroRuleView(axis: .horizontal, style: .single)
+    private let countLabel = NSTextField(labelWithString: "")
     private let actionStack = NSStackView()
     private var buttons: [KeyHintButton] = []
     private var actions: [PanelRowAction] = []
     private var fullActionWidth: CGFloat = 0
 
+    /// The heading as shown: `UNSTAGED 2`.
+    var headingText: String { "\(titleLabel.stringValue) \(countLabel.stringValue)" }
+
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.setContentHuggingPriority(.required, for: .horizontal)
-        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        addSubview(titleLabel)
-        addSubview(rule)
+        for label in [titleLabel, countLabel] {
+            label.translatesAutoresizingMaskIntoConstraints = false
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            label.lineBreakMode = .byTruncatingTail
+            addSubview(label)
+        }
         actionStack.orientation = .horizontal
-        actionStack.spacing = 4
+        actionStack.spacing = 2
         actionStack.translatesAutoresizingMaskIntoConstraints = false
         actionStack.setHuggingPriority(.required, for: .horizontal)
         actionStack.setContentCompressionResistancePriority(.required, for: .horizontal)
         addSubview(actionStack)
+        let headingCenter = centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor, constant: -Self.topMargin / 2)
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 1),
-            rule.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
-            rule.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            rule.heightAnchor.constraint(equalToConstant: Retro.hairline),
-            rule.widthAnchor.constraint(greaterThanOrEqualToConstant: 0),
-            rule.trailingAnchor.constraint(equalTo: actionStack.leadingAnchor, constant: -8),
+            headingCenter,
+            countLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8),
+            countLabel.firstBaselineAnchor.constraint(equalTo: titleLabel.firstBaselineAnchor),
+            actionStack.leadingAnchor.constraint(greaterThanOrEqualTo: countLabel.trailingAnchor, constant: 8),
             actionStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             actionStack.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
         ])
@@ -252,8 +304,8 @@ final class PanelSectionCellView: NSTableCellView {
     func configure(section: PanelSection, count: Int, actions: [PanelRowAction], theme: AppTheme) {
         let colors = theme.colors
         let tint = section == .conflicts ? colors.danger : colors.textMuted
-        titleLabel.setRetroText("\(section.title) (\(count))", color: tint)
-        rule.color = section == .conflicts ? colors.danger.withAlphaComponent(0.5) : colors.borderSubtle
+        titleLabel.setEyebrowText(section.title, color: tint)
+        countLabel.setChromeText("\(count)", font: ChromeFont.count, color: tint)
         for button in buttons {
             actionStack.removeArrangedSubview(button)
             button.removeFromSuperview()
@@ -262,7 +314,13 @@ final class PanelSectionCellView: NSTableCellView {
         self.actions = actions
         fullActionWidth = 0
         for (index, action) in actions.enumerated() {
-            let button = KeyHintButton(title: action.title, hint: PanelText.keycap(action.commandID), theme: theme, kind: action.kind)
+            let button = KeyHintButton(
+                title: action.title,
+                hint: SettingsCenter.shared.keycaps(for: action.commandID),
+                theme: theme,
+                kind: action.kind == .standard ? .text : action.kind
+            )
+            button.isPlain = true
             button.tag = index
             button.target = self
             button.action = #selector(runAction(_:))
@@ -282,9 +340,10 @@ final class PanelSectionCellView: NSTableCellView {
     }
 
     private func updateHints() {
-        let showHints = fullActionWidth + titleLabel.intrinsicContentSize.width + 36 <= bounds.width
+        let heading = titleLabel.intrinsicContentSize.width + 8 + countLabel.intrinsicContentSize.width
+        let showHints = fullActionWidth + heading + 36 <= bounds.width
         for (button, action) in zip(buttons, actions) {
-            let hint = showHints ? PanelText.keycap(action.commandID) : nil
+            let hint = showHints ? SettingsCenter.shared.keycaps(for: action.commandID) : nil
             if button.hint != hint { button.hint = hint }
         }
     }

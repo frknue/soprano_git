@@ -82,9 +82,9 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         tableView.target = self
         tableView.action = #selector(rowClicked)
         tableView.setAccessibilityLabel("Diff")
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: DiffLineCellView.rowHeight)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: DiffLineCellView.rowHeight, surface: .base)
         tableView.selectionHighlightStyle = .none
-        scrollView = RetroListStyle.makeScrollView(documentView: tableView, theme: theme)
+        scrollView = ListStyle.makeScrollView(documentView: tableView, theme: theme, surface: .base)
         tableView.scrollText = { [weak self] delta in
             guard let self, textScroll.limit > 0 else { return false }
             setTextOffset(textOffset + delta)
@@ -100,10 +100,15 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         textScroller.target = self
         textScroller.action = #selector(textScrolled)
 
+        header.previousButton.target = self
+        header.previousButton.action = #selector(previousHunkClicked)
+        header.nextButton.target = self
+        header.nextButton.action = #selector(nextHunkClicked)
         header.closeButton.target = self
         header.closeButton.action = #selector(closeClicked)
-        header.layoutButton.target = self
-        header.layoutButton.action = #selector(layoutClicked)
+        header.layoutControl.onSelect = { [weak self] layout in
+            self?.select(layout)
+        }
         header.show(layout: layout)
 
         noticeLabel.alignment = .center
@@ -152,11 +157,11 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     }
 
     private func applyTheme() {
-        view.layer?.backgroundColor = theme.colors.bgPanel.cgColor
+        view.layer?.backgroundColor = theme.colors.bgBase.cgColor
         header.apply(theme: theme)
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: DiffLineCellView.rowHeight)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: DiffLineCellView.rowHeight, surface: .base)
         tableView.selectionHighlightStyle = .none
-        RetroListStyle.applyScrollView(scrollView, theme: theme)
+        ListStyle.applyScrollView(scrollView, theme: theme, surface: .base)
         textScroller.colors = theme.colors
         rebuildStyle()
         updateHeader()
@@ -339,26 +344,16 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
 
     private func updateHeader() {
         guard let open = controller.openDiff ?? loadedDiff else { return }
-        let colors = theme.colors
-        let side: String
-        var sideColor: NSColor?
-        switch open.target {
-        case .unstaged:
-            side = "Unstaged"
-            sideColor = colors.yellow
-        case .staged:
-            side = "Staged"
-            sideColor = colors.success
-        case let .commit(id, _):
-            side = String(id.prefix(7))
-        case let .stash(index, _):
-            side = "stash@{\(index)}"
-            sideColor = colors.cyan
+        let side: DiffHeaderView.Side = switch open.target {
+        case .unstaged: .word("Unstaged")
+        case .staged: .word("Staged")
+        case let .commit(id, _): .identifier(String(id.prefix(7)))
+        case let .stash(index, _): .identifier("stash@{\(index)}")
         }
         let file = document.file
         let position: String
         if let currentHunk, document.hunkCount > 0 {
-            position = "Hunk \(currentHunk + 1)/\(document.hunkCount)"
+            position = "Hunk \(currentHunk + 1) of \(document.hunkCount)"
         } else {
             position = ""
         }
@@ -370,7 +365,6 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             deletions: file?.isBinary == true ? nil : document.deletions,
             showCounts: file != nil,
             side: side,
-            sideColor: sideColor,
             position: position
         )
     }
@@ -387,17 +381,15 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             text = document.notice
         }
         noticeLabel.isHidden = text == nil
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        noticeLabel.attributedStringValue = NSAttributedString(string: text ?? "", attributes: [
-            .font: RetroFont.body(12), .foregroundColor: color, .paragraphStyle: paragraph,
-        ])
+        noticeLabel.attributedStringValue = ChromeText.attributed(
+            text ?? "", font: ChromeFont.label, color: color, alignment: .center, lineBreakMode: .byWordWrapping
+        )
     }
 
     /// The one-line notice shown instead of hunks, if any.
     var noticeText: String? { noticeLabel.isHidden ? nil : noticeLabel.stringValue }
 
-    /// The header's layout toggle title (Unified / Split).
+    /// The header's active layout title (Inline / Split).
     var layoutToggleTitle: String { header.layoutText }
 
     // MARK: - Layout
@@ -427,7 +419,9 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         }
     }
 
-    @objc private func layoutClicked() {
+    /// A click on the header's Split | Inline control.
+    private func select(_ next: DiffLayout) {
+        guard next != layout else { return }
         toggleLayout()
     }
 
@@ -510,10 +504,16 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     private func setCurrentHunk(_ hunk: Int?) {
         guard hunk != currentHunk else { return }
         currentHunk = hunk
+        let tickRow = currentChangeRow
         tableView.enumerateAvailableRowViews { rowView, row in
-            (rowView.view(atColumn: 0) as? DiffRowCell)?.isCurrentHunk = document.hunk(ofRow: row, in: layout) == hunk && hunk != nil
+            (rowView.view(atColumn: 0) as? DiffLineRowCell)?.isCurrentChange = row == tickRow
         }
         updateHeader()
+    }
+
+    /// The row carrying the pencil tick: the current hunk's first change.
+    var currentChangeRow: Int? {
+        currentHunk.flatMap { document.firstChangedRow(ofHunk: $0, in: layout) }
     }
 
     private func scrollToCurrentHunk() {
@@ -629,6 +629,14 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         close()
     }
 
+    @objc private func previousHunkClicked() {
+        moveHunk(by: -1)
+    }
+
+    @objc private func nextHunkClicked() {
+        moveHunk(by: 1)
+    }
+
     @objc private func rowClicked() {
         if let hunk = document.hunk(ofRow: tableView.clickedRow, in: layout) {
             setCurrentHunk(hunk)
@@ -667,11 +675,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
         case let .hunk(index):
             let cell = tableView.makeView(withIdentifier: DiffHunkHeaderCellView.identifier, owner: nil) as? DiffHunkHeaderCellView
                 ?? DiffHunkHeaderCellView()
-            cell.configure(
-                hunk: file.hunks[index], actions: hunkActions(for: index), style: style, theme: theme,
-                textInset: layout == .unified ? style.gutterWidth : style.sideGutterWidth,
-                isCurrentHunk: index == currentHunk
-            )
+            cell.configure(hunk: file.hunks[index], actions: hunkActions(for: index), style: style, theme: theme)
             return cell
         case .line:
             let cell = tableView.makeView(withIdentifier: DiffLineCellView.identifier, owner: nil) as? DiffLineCellView
@@ -692,16 +696,20 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     }
 
     /// Configures a unified or split line cell for `row`: only that row's
-    /// lines and tokens are looked up and turned into attributes.
+    /// lines, tokens and word emphasis are looked up and turned into attributes.
     private func configureLine(_ cell: NSView, row: Int) {
         let rows = rows
         guard rows.indices.contains(row), let file = document.file else { return }
+        let isCurrentChange = row == currentChangeRow
         switch rows[row] {
         case let .line(hunk, index):
             guard let cell = cell as? DiffLineCellView else { return }
             let line = file.hunks[hunk].lines[index]
             let tokens = line.kind == .removed ? oldTokens(of: line) : newTokens(of: line)
-            cell.configure(line: line, tokens: tokens, style: style, isCurrentHunk: hunk == currentHunk)
+            cell.configure(
+                line: line, tokens: tokens, emphasis: document.changedRange(hunk: hunk, line: index), style: style,
+                isCurrentChange: isCurrentChange
+            )
             cell.textOffset = textOffset
         case let .pair(hunk, old, new):
             guard let cell = cell as? DiffSplitLineCellView else { return }
@@ -710,8 +718,10 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
             let newLine = new.map { lines[$0] }
             cell.configure(
                 old: oldLine, oldTokens: oldLine.flatMap(oldTokens(of:)),
+                oldEmphasis: old.flatMap { document.changedRange(hunk: hunk, line: $0) },
                 new: newLine, newTokens: newLine.flatMap(newTokens(of:)),
-                style: style, isCurrentHunk: hunk == currentHunk
+                newEmphasis: new.flatMap { document.changedRange(hunk: hunk, line: $0) },
+                style: style, isCurrentChange: isCurrentChange
             )
             cell.textOffset = textOffset
         case .hunk, .notice:
@@ -731,7 +741,7 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
 /// The diff list. Horizontal scroll gestures (trackpad, ⇧ + mouse wheel) go
 /// to `scrollText` instead of the list, which never scrolls sideways; a
 /// trackpad gesture and its momentum keep the axis they started on.
-final class DiffTableView: RetroTableView {
+final class DiffTableView: ListTableView {
     /// Scrolls the code text by a point delta (positive: further into the
     /// lines); false when no line overflows, so the event scrolls the list.
     var scrollText: ((CGFloat) -> Bool)?
@@ -763,7 +773,7 @@ final class DiffTableView: RetroTableView {
 }
 
 /// The diff's horizontal text scroller: AppKit's tracking (knob drag, clicks
-/// in the slot), drawn as a square `textMuted` bar without a slot.
+/// in the slot), drawn as a capsule `scrollbarThumb` knob without a slot.
 final class DiffTextScroller: NSScroller {
     var colors: ThemeColors? {
         didSet { needsDisplay = true }
@@ -780,8 +790,9 @@ final class DiffTextScroller: NSScroller {
     override func draw(_ dirtyRect: NSRect) {
         guard let colors else { return }
         let knob = rect(for: .knob)
-        colors.textMuted.withAlphaComponent(0.45).setFill()
-        NSRect(x: knob.minX + 2, y: bounds.midY - 3, width: max(0, knob.width - 4), height: 6).fill(using: .sourceOver)
+        colors.scrollbarThumb.setFill()
+        let bar = NSRect(x: knob.minX + 2, y: bounds.midY - 3, width: max(0, knob.width - 4), height: 6)
+        NSBezierPath(roundedRect: bar, xRadius: bar.height / 2, yRadius: bar.height / 2).fill()
     }
 }
 

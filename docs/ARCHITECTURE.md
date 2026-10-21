@@ -2,7 +2,7 @@
 
 Soprano Git is a keyboard-first Git client for macOS in the Soprano family: GitKraken's
 layout and shortcuts (commit graph, left ref panel, right commit panel) in Soprano's
-"Mission Control" chrome. Swift 6 + programmatic AppKit, SPM, macOS 14+, git CLI only.
+Folio chrome. Swift 6 + programmatic AppKit, SPM, macOS 14+, git CLI only.
 
 ## Toolchain
 
@@ -88,8 +88,11 @@ menus, toolbar buttons, and the shortcut sheet. Commands act on `context.target`
 - `~/.config/soprano-git/settings.json` (JSONC, `SOPRANO_GIT_CONFIG` overrides the path),
   live-reloaded; bad values become warnings, never launch failures (Soprano's
   `ConfigIssue` model).
-- `theme`: a Soprano theme id, or `"soprano"` (default) to follow
-  `~/.config/soprano/settings.json`'s `theme`, live; Mission Control when absent.
+- `theme`: `"soprano"` (default) follows `~/.config/soprano/settings.json`'s `theme` and
+  appearance, live; `"folio"` follows macOS (Paper in light, Ink in dark); `"folio-paper"`
+  / `"folio-ink"` pin one; the other `AppTheme.options` ids are third-party themes. An
+  unknown id (e.g. the removed `mission-control`) keeps the default `"soprano"` with a
+  warning; Soprano's own unknown theme id resolves to `folio`.
 - `keybindings`: `prefixKey` (default `a` → ⌃A), `prefixTimeoutMs` (1500, 300–5000),
   `bindings: { "<command id>": "chord" | ["chord", …] | null }`.
 - `ThemeCenter.shared.theme` + `addObserver`; `SettingsCenter.shared.settings`,
@@ -209,55 +212,85 @@ keys inside lists (vim/lazygit). Owner = module that registers the command.
 
 ## Layout and visual design
 
-Everything uses the vendored chrome: `Retro*` components, `ThemeColors` tokens, Departure
-Mono via `RetroFont.display` at **11 or 22 pt only** (small caps, never uppercase strings
-by hand), `RetroFont.body` for running text (messages, paths, diff text, inputs). Square
-corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.darkAqua`.
+Everything uses the vendored Folio chrome (`Vendored/Chrome.swift`, `Theme.swift`):
+`Chrome*` components and `ThemeColors` tokens only. Fonts by `ChromeFont` role: SF Pro for
+chrome, labels and prose; SF Mono for paths, SHAs, ids, code and diff text; New York
+(`headline`, `screen`, `title`, `empty`) only at 15 pt and up; nothing below 11 pt. Radii
+and spacing from `Chrome.Radius` / `Chrome.Space`. Windows, panels and dialogs take
+`theme.appearance.nsAppearance`. Accent appears only on the focus rule, the pencil tick,
+the caret, matched characters on the selected row, and the prefix mode chip.
 
 ```
-┌ tab bar 34pt: traffic-light inset 78pt · repo tabs (selected = accent block) · + ┐
-├ toolbar 40pt: repo · ⎇ branch ↑a ↓b │ PULL PUSH │ BRANCH │ STASH POP │ … ⌘P      ┤
-╞═══════════════ double rule ═══════════════════════════════════════════════════╡
+┌ tab bar 36pt: traffic-light inset · repo tabs · +                                ┐
+├ toolbar 38pt: repo · branch ↑a ↓b · Pull Push · Branch · Stash Pop · Refs ⌘J · Commit ⌘K · ⌘P ┤
 │ sidebar 240 (180–420) │ center: banner? + graph | diff │ commit panel 380 (300–600)│
-├ status bar 24pt: mode chip · activity lamp + text · ⎇ branch · N commits        ┤
+├ status bar 26pt: mode chip · activity mark + text · focus hints · branch · N commits ┤
 ```
 
-- Surfaces: window `bgBase`, panels `bgPanel`, inputs/strips `bgRaised`, hover `bgOverlay`.
-- Rows (`Views/Common`): selection `bgSelectedStrong` + 2 pt `accent` leading rail when
-  the region has focus, `bgSelected` + `railMuted` rail when not; hover `bgOverlay`.
-- Shared kit in `Views/Common`: `RetroTableView` / `RetroOutlineView` (hover tracking,
-  vend `RetroRowView`), `RetroListStyle.apply(to:theme:rowHeight:)` /
-  `makeScrollView(documentView:theme:)`, `PanelHeaderView` (`isFocused` → focus bar),
-  `KeycapView`, `RetroSearchField`, `ChangeKindBadge`, `RetroCheckbox`,
-  `DateText.format(_:style:)`. Leaf views re-style through `apply(theme:)`.
-- Headings: `RetroHeadingView` (`LOCAL ─────`). Dividers: `RetroRuleView` (double between
-  toolbar and body, single hairlines `borderSubtle` between panels).
-- Focused panel: its header gets `bgRaised` + 4 pt `accent` leading bar (Soprano
-  `PaneHeaderView`).
-- Change kinds: modified `yellow`, added/untracked `success`, deleted/conflict `danger`,
-  renamed/copied `cyan`, type change `blue`.
-- Diff tints: added `success` α0.14, removed `danger` α0.14. Split fillers `textMuted`
-  α0.06 with a diagonal `borderSubtle` hatch; a `borderSubtle` hairline divides the sides.
-  Syntax colors use Soprano's editor mapping (`SyntaxTokenKind.color(in:)`).
+- Surfaces: window and graph/diff `bgBase`, panels `bgPanel`, inputs/strips `raised`,
+  hover `hover`; hairlines (`Chrome.hairline`, `borderSubtle`) between panels.
+- Toolbar (`WorkspaceToolbarView`): `CommandButton`s bound to a command id draw their own
+  K1 caps; `plain` (borderless, hover fill), `ink` (primary), `standard`. The Refs (⌘J) and
+  Commit panel (⌘K) toggles are `CommandButton`s with `isToggledOn` (raised pill while on),
+  mirrored by `setPanelVisibility(sidebar:commitPanel:)`.
+- Status bar (`WorkspaceStatusBarView`): `HintsView` shows the focused region's keys from
+  `hints(for:settings:)`, each with the caps of the command's shortest chord (`?` over
+  `⌘/`); unbound commands drop out.
+- Operation banner: a status mark plus status-coloured text (no uppercase word, no wash).
+- Graph date column: its default width fits the widest date of the current date style.
+- Settings › Keyboard: a customized shortcut shows its primary caps plus an outline
+  `Custom` chip.
+- Welcome screen: recent-repository rows show plain muted numbers.
+- Rows: `ChromeSelectionPill` — `selection` plus the accent pencil tick when the region has
+  focus, `selectionMuted` when not, `hover` on hover; inset 2 pt vertically.
+- Shared kit in `Views/Common`: `ListTableView` / `ListOutlineView` (hover tracking, vend
+  `ListRowView`), `ListStyle.apply(to:theme:rowHeight:surface:)` /
+  `makeScrollView(documentView:theme:surface:)` / `applyScrollView` (`.panel` = `bgPanel`,
+  `.base` = `bgBase`; rows vend through `makeListRowView(row:)`), `PanelHeaderView`
+  (eyebrow title; `detailStyle` `.count` muted or `.sha` ink SF Mono; `isFocused` → ink
+  title, `raised` fill and a 2 pt `focusMark` rule on the bottom edge),
+  `SearchField` (`Chrome.fieldHeight`, optional hint cap), `ChangeKindBadge`,
+  `DateText.format(_:style:)`. Section headings use `ChromeEyebrowView`; checkboxes are
+  `ChromeCheckbox` with a separate label. Leaf views re-style through `apply(theme:)`.
+- Change kinds: a bare coloured SF Mono letter — modified `yellow`, added/untracked
+  `success`, deleted/conflict `danger`, renamed/copied `cyan`, type change `blue`.
+- Diff: added lines `diffAdd`, removed `diffDelete`; the differing middle of a paired
+  line (Soprano's rule: common prefix and suffix stripped) gets `diffAddWord` /
+  `diffDeleteWord` (`DiffDocument.changedRange`). The current hunk's first changed row
+  carries the 2×14 pencil tick. Split fillers are flat
+  `diffFiller`; a `borderSubtle` hairline divides the sides. Syntax colors use the
+  theme's `syntax*` tokens (`SyntaxTokenKind.color(in:)`). `DiffLayoutControl` is the
+  Split | Inline segmented control (`v`).
 - Diff horizontal scroll: the list never scrolls sideways; `DiffViewController.textOffset`
   shifts only the code text of line rows (clipped past the marker), so gutters, markers
   and hunk headers stay put and both split sides move together. `DiffTableView` routes
   sideways wheel/trackpad deltas there (a gesture keeps the axis it started on);
-  `DiffTextScroller` is a slotless `textMuted` α0.45 bar along the list's bottom, hidden
+  `DiffTextScroller` is a slotless bar along the list's bottom whose knob is a
+  `scrollbarThumb` capsule, hidden
   when no line overflows. The range comes from `DiffDocument.oldColumns` / `newColumns`
   (widest line per side in monospaced columns) at the clip view's width.
-- Graph: 28 pt rows; lanes 14 pt apart, 2 pt lines; commit nodes are lamps (10 pt, merges
-  7 pt hollow), HEAD gets a ring, stashes a small square, the working copy a dashed ring.
-  Lane colors come from the theme. Ref pills in the first column, display face 11, square,
-  tinted with the lane color; HEAD's branch pill is lit.
-- Toolbar keys are `RetroButton`s with their shortcut as a keycap hint.
+- Graph: 28 pt rows; lanes 14 pt apart, 2 pt lines, colors from `theme.graphLanes`; commit
+  nodes 8 pt: filled dot, ring for merges, square for stashes, dashed muted ring for the
+  working copy; HEAD adds an ink ring. Ref pills (`RefPillView`, also in the commit panel):
+  18 pt, radius 4, lane color at 10 % with a 1 pt lane edge, SF Pro 11 Medium; HEAD's pill
+  is ink.
+- Commit panel (`Views/Detail/PanelKit.swift`): `KeyHintButton` with trailing K1 caps,
+  kinds `standard` / `ink` / `text` / `danger` (calm at rest, danger fill on hover);
+  `PanelText.path` sets paths in SF Mono 12 (muted directory, Semibold file name) and, given
+  `availableWidth`, drops whole leading components behind `…/`. The composer uses
+  `ChromeFieldView`s and an Amend `ChromeCheckbox`; Commit is the ink button.
+- Floating surfaces (`FloatingSurfaceView`): dialogs (`DialogPanel`, 480 pt) r10 with the
+  e3 shadow, confirm ink or danger fill when destructive; the shortcut sheet 720×560 r12
+  with e3; the error toast r10 with e2.
+- Keycaps: K1 caps (`ChromeKeycapView` / `ChromeKeycapGroupView`) from
+  `SettingsCenter.shared.keycaps(for:)`, e.g. `⌃A` `⇧P`.
 - Working-Copy-Panel: Ohne Dateiauswahl stehen „Discard all“ und „Stage all“ im
   Unstaged-Abschnitt. Mit Auswahl zeigen die Abschnitts- und Zeilenaktionen deren
   Anzahl („Stage N“, „Discard N“, im Staged-Abschnitt „Unstage N“); sie bearbeiten
   nur die ausgewählten Pfade desselben Abschnitts. Bei wenig Platz entfallen
   die Shortcut-Hinweise. Discard bestätigt die Anzahl und das Löschen ungetrackter
   Dateien; nicht ausgewählte Dateien, Index und Konflikte bleiben unverändert.
-- `PanelFileTableView` erweitert `RetroTableView` um Ctrl-/⌘-Klick zum Umschalten
+- `PanelFileTableView` erweitert `ListTableView` um Ctrl-/⌘-Klick zum Umschalten
   einzelner Dateien und ⇧-Klick für Bereiche; Abschnittsüberschriften sind nicht
   auswählbar. Modifizierte Klicks öffnen keinen Diff; ein einfacher Klick ersetzt
   die Auswahl und öffnet den Diff. AppKit übernimmt weiterhin die Tastaturauswahl.
@@ -267,7 +300,7 @@ corners; lamps (`RetroLamp`) are the only round chrome. Appearance forced to `.d
 
 ## Verification harness
 
-`SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>]
+`SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>, default folio-paper]
 [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
 [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
 [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
@@ -279,10 +312,13 @@ window offscreen (no Dock icon, no visible window, no persisted state), loads th
 toast), applies `--select` (controller selection), `--diff` (`controller.showDiff`) and
 `--focus` (workspace focus), opens the settings tab on a page (`--settings`), replays `--keys` through the keyboard router (into the dialog or panel while one
 is shown), waits for async work to settle, and writes a PNG of the window including
-dialogs and child panels (rendered through Core Animation, so lamps and fills are
+dialogs and child panels (rendered through Core Animation, so fills and shadows are
 exact). Offscreen, dialogs show as child panels at the sheet position, since AppKit
-moves a sheet's parent on screen. Agents verify UI with it and `read` the PNG; they do
-not launch the GUI.
+moves a sheet's parent on screen. The window sets `MainWindow.rendersAsKey`, so the
+focused list draws its pencil tick without the window being key. Floating surfaces
+(dialogs, the shortcut sheet) draw their own shadow; only opaque shadowed child windows
+get a harness-drawn one. Agents verify UI with it and `read` the PNG; they do not launch
+the GUI.
 
 `--click-file` ist wiederholbar: Die Klicks laufen in der angegebenen Reihenfolge
 nach der Ansichts-/Fokuseinstellung und vor `--keys` über den echten Mouse-Down-Pfad

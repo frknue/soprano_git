@@ -15,7 +15,7 @@ struct RefPill: Hashable {
     }
 
     let kind: Kind
-    /// The checked-out branch (or detached HEAD): drawn lit.
+    /// The checked-out branch (or detached HEAD): drawn as the ink pill.
     let isHead: Bool
 
     var name: String {

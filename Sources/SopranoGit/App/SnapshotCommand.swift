@@ -1,7 +1,7 @@
 import AppKit
 import SopranoGitCore
 
-/// `SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme <id>]
+/// `SopranoGit snapshot --repo <path> --out <png> [--size 1500x940] [--theme folio-paper|folio-ink|<id>]
 /// [--keys "<chord> <chord> …"] [--wait <seconds>] [--recent <path>,…]
 /// [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
 /// [--select wip|stash:<N>|<commit-ish>] [--diff unstaged:<path>|staged:<path>|<commit-ish>:<path>]
@@ -18,7 +18,8 @@ enum SnapshotCommand {
         var repo: URL?
         var out: URL
         var size = NSSize(width: 1500, height: 940)
-        var theme: String?
+        /// Forced theme id; Folio Paper unless `--theme` names another.
+        var theme = AppTheme.folioPaper.id
         var keys: [String] = []
         var wait: Double = 0.6
         var recent: [URL] = []
@@ -58,7 +59,7 @@ enum SnapshotCommand {
     }
 
     static let usage = """
-    usage: SopranoGit snapshot --out <png> [--repo <path>] [--size 1500x940] [--theme <id>]
+    usage: SopranoGit snapshot --out <png> [--repo <path>] [--size 1500x940] [--theme folio-paper|folio-ink|<id>]
                                [--keys "<chord> …"] [--wait <seconds>] [--recent <path>,…]
                                [--dialog prompt|confirm|choose|alert] [--fail <operation title>]
                                [--select wip|stash:<N>|<commit-ish>] [--focus sidebar|graph|detail|diff]
@@ -130,7 +131,6 @@ enum SnapshotCommand {
         let app = NSApplication.shared
         // No Dock icon and never activated: nothing appears on the user's screen.
         app.setActivationPolicy(.accessory)
-        app.appearance = NSAppearance(named: .darkAqua)
         Task { @MainActor in
             do {
                 try await capture(options)
@@ -149,13 +149,12 @@ enum SnapshotCommand {
     }
 
     static func capture(_ options: Options) async throws {
-        _ = RetroFont.registerBundledFont()
         let settings = SettingsCenter.shared
         settings.start(createIfMissing: false, watching: false)
         ThemeCenter.shared.apply(setting: settings.settings.theme, watch: false)
-        if let theme = options.theme {
-            ThemeCenter.shared.forcedThemeID = theme
-        }
+        ThemeCenter.shared.forcedThemeID = options.theme
+        // Offscreen AppKit controls draw in the forced theme's light/dark appearance.
+        NSApp.appearance = ThemeCenter.shared.theme.appearance.nsAppearance
         if CommandRegistry.shared.commands.isEmpty {
             AllCommands.registerAll()
         }
@@ -170,6 +169,7 @@ enum SnapshotCommand {
         let controller = MainWindowController(state: state, persistsState: false, frame: frame)
         guard let window = controller.mainWindow else { throw CaptureError(description: "no window") }
         window.allowsOffscreenFrame = true
+        window.rendersAsKey = true
         window.setFrame(frame, display: false)
         window.orderFrontRegardless()
         DialogPanel.presentsAsSheet = false
@@ -464,8 +464,8 @@ enum SnapshotCommand {
     // MARK: - Rendering
 
     /// Renders the window and everything above it (sheet, dialog, child
-    /// panels) through Core Animation, so layer-backed content (lamp glows,
-    /// accent fills, borders) appears exactly as on screen.
+    /// panels) through Core Animation, so layer-backed content (fills, borders,
+    /// shadows) appears exactly as on screen.
     static func render(controller: MainWindowController, window: NSWindow) throws -> CGImage {
         let scale = max(1, window.backingScaleFactor)
         let size = window.frame.size
@@ -488,7 +488,9 @@ enum SnapshotCommand {
                 x: layerWindow.frame.minX - window.frame.minX,
                 y: layerWindow.frame.minY - window.frame.minY
             )
-            if index > 0 {
+            // Floating surfaces (dialogs, the shortcut sheet) draw their own
+            // elevation shadow; only opaque shadowed windows get one here.
+            if index > 0, layerWindow.hasShadow, layerWindow.isOpaque {
                 drawShadow(for: NSRect(origin: origin, size: layerWindow.frame.size), in: context)
             }
             try draw(layerWindow, at: origin, in: context)

@@ -22,8 +22,8 @@ enum SettingsFile {
             .appendingPathComponent(".config/soprano-git/settings.json", isDirectory: false)
     }
 
-    /// Soprano's own settings file, whose `theme` Soprano Git follows when its
-    /// `theme` is "soprano". Same resolution as Soprano's `ConfigFile.url`.
+    /// Soprano's own settings file, whose `theme` and `appearance` Soprano Git
+    /// follows when its `theme` is "soprano". Same resolution as Soprano's `ConfigFile.url`.
     static func sopranoURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         if let override = environment["SOPRANO_CONFIG"], !override.isEmpty {
             return URL(fileURLWithPath: NSString(string: override).expandingTildeInPath).standardizedFileURL
@@ -85,12 +85,13 @@ enum SettingsFile {
 
     /// A commented starter document: the schema is the documentation.
     static var template: String {
-        let themes = AppTheme.allThemes.map { "\"\($0.id)\"" }.joined(separator: ", ")
+        let themes = AppTheme.options.map { "\"\($0.id)\"" }.joined(separator: ", ")
         return """
         // Soprano Git settings. JSON with comments; saved changes apply immediately.
         // Unknown keys and bad values are ignored with a warning, never a crash.
         {
-          // "soprano" follows the theme of Soprano (~/.config/soprano/settings.json).
+          // "soprano" follows the theme and appearance of Soprano (~/.config/soprano/settings.json).
+          // "folio" is Folio Paper or Folio Ink, following the macOS appearance.
           // Or pick one: \(themes)
           "theme": "soprano",
 

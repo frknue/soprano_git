@@ -11,14 +11,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Self.installApplicationIcon()
-        NSApp.appearance = NSAppearance(named: .darkAqua)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        _ = RetroFont.registerBundledFont()
         let settings = SettingsCenter.shared
         settings.start()
         ThemeCenter.shared.apply(setting: settings.settings.theme)
+        ThemeCenter.shared.startDrivingApplicationAppearance()
 
         AllCommands.registerAll()
         settings.reloadKeymap()
@@ -72,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     static func installApplicationIcon() {
         let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
-            ?? SopranoResources.bundle.url(forResource: "AppIcon", withExtension: "icns")
+            ?? AppResources.bundle.url(forResource: "AppIcon", withExtension: "icns")
         if let url, let image = NSImage(contentsOf: url) {
             NSApp.applicationIconImage = image
         }

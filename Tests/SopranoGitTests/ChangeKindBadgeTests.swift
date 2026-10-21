@@ -5,7 +5,7 @@ import Testing
 
 @MainActor
 struct ChangeKindBadgeTests {
-    let colors = AppTheme.missionControl.colors
+    let colors = AppTheme.folioPaper.colors
 
     @Test func everyKindMapsToItsLetter() {
         let expected: [(ChangeKind, String)] = [
@@ -30,11 +30,13 @@ struct ChangeKindBadgeTests {
         }
     }
 
-    @Test func badgeIsAFixedSixteenPointSquare() {
-        let badge = ChangeKindBadge(kind: .modified, theme: .missionControl)
-        #expect(badge.intrinsicContentSize == NSSize(width: 16, height: 16))
+    @Test func badgeIsABareTwelvePointLetterInTheKindColor() {
+        let badge = ChangeKindBadge(kind: .modified, theme: .folioPaper)
+        #expect(badge.intrinsicContentSize.width == 12)
+        #expect(badge.layer?.borderWidth ?? 0 == 0)
         badge.kind = .deleted
         badge.apply(theme: .nord)
-        #expect(badge.layer?.borderColor == AppTheme.nord.colors.danger.cgColor)
+        #expect(badge.letterText == "D")
+        #expect(badge.letterColor == AppTheme.nord.colors.danger)
     }
 }

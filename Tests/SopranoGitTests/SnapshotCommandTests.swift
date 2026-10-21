@@ -21,6 +21,14 @@ struct SnapshotCommandTests {
         #expect(options.fail == "Push")
     }
 
+    @Test func withoutAThemeOptionSnapshotsForceFolioPaper() throws {
+        let paper = try SnapshotCommand.parse(["--out", "/tmp/shot.png"])
+        #expect(paper.theme == "folio-paper")
+
+        let ink = try SnapshotCommand.parse(["--out", "/tmp/shot.png", "--theme", "folio-ink"])
+        #expect(ink.theme == "folio-ink")
+    }
+
     @Test func badOptionsAreRejected() {
         #expect(throws: SnapshotCommand.OptionError.self) { try SnapshotCommand.parse(["--repo", "/tmp/x"]) }
         #expect(throws: SnapshotCommand.OptionError.self) { try SnapshotCommand.parse(["--out", "/tmp/x.png", "--size", "big"]) }

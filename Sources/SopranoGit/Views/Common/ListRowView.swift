@@ -1,10 +1,11 @@
 import AppKit
 
-/// A list row with Soprano's selection look. Focused region (emphasized):
-/// bgSelectedStrong plus a 2pt accent leading rail; unfocused: bgSelected plus
-/// a railMuted rail; hover (not selected): bgOverlay.
-final class RetroRowView: NSTableRowView {
-    static let railWidth: CGFloat = 2
+/// A list row with Folio's selection idiom: an inset selection pill, plus the
+/// sienna pencil tick while the list's region holds focus (emphasized); the
+/// muted pill without a tick otherwise; a hover pill under the pointer.
+final class ListRowView: NSTableRowView {
+    /// Vertical inset of the pill inside the row (`inset: 2px 4px` in the mock).
+    static let pillVerticalInset: CGFloat = 2
 
     var colors: ThemeColors? {
         didSet { needsDisplay = true }
@@ -14,15 +15,25 @@ final class RetroRowView: NSTableRowView {
         didSet { if oldValue != isHovered { needsDisplay = true } }
     }
 
-    var showsRail = true {
-        didSet { needsDisplay = true }
-    }
-
     override var isEmphasized: Bool {
         didSet { needsDisplay = true }
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    /// The pill style the row draws in its current state.
+    var pillStyle: ChromeSelectionPill.Style {
+        if isSelected { return showsFocus ? .selected : .selectedUnfocused }
+        return isHovered ? .hover : .none
+    }
+
+    /// AppKit's emphasis, or, in a window that renders as key without being
+    /// key (snapshot harness), whether the row's list is first responder.
+    private var showsFocus: Bool {
+        if isEmphasized { return true }
+        guard let window = window as? MainWindow, window.rendersAsKey, let list = superview else { return false }
+        return window.firstResponder === list
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -31,27 +42,48 @@ final class RetroRowView: NSTableRowView {
 
     override func drawBackground(in dirtyRect: NSRect) {
         guard let colors else { return super.drawBackground(in: dirtyRect) }
-        if isHovered && !isSelected {
-            colors.bgOverlay.setFill()
-            bounds.fill()
-        }
+        guard !isSelected, isHovered else { return }
+        ChromeSelectionPill.draw(.hover, in: pillRect, colors: colors)
     }
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard let colors else { return super.drawSelection(in: dirtyRect) }
-        (isEmphasized ? colors.bgSelectedStrong : colors.bgSelected).setFill()
-        bounds.fill()
-        if showsRail {
-            (isEmphasized ? colors.accent : colors.railMuted).setFill()
-            NSRect(x: 0, y: 0, width: Self.railWidth, height: bounds.height).fill()
+        ChromeSelectionPill.draw(showsFocus ? .selected : .selectedUnfocused, in: pillRect, colors: colors)
+    }
+
+    /// Height of the row's content when it is shorter than the row (ref
+    /// section rows carry their top margin inside the row): the pill and tick
+    /// align to the bottom `contentHeight` points. Nil = the whole row.
+    var contentHeight: CGFloat? {
+        didSet { if oldValue != contentHeight { needsDisplay = true } }
+    }
+
+    /// The rect the pill is drawn in (tests).
+    var pillRect: NSRect {
+        var content = bounds
+        if let contentHeight, contentHeight < bounds.height {
+            content.size.height = contentHeight
+            if isFlipped { content.origin.y = bounds.maxY - contentHeight }
         }
+        return content.insetBy(dx: 0, dy: Self.pillVerticalInset)
     }
 }
 
 /// Table and outline styling shared by every list.
 @MainActor
-enum RetroListStyle {
-    static func apply(to tableView: NSTableView, theme: AppTheme, rowHeight: CGFloat = 24) {
+enum ListStyle {
+    /// The surface a list sits on: `panel` (refs, commit panel, welcome,
+    /// settings) or `base` (the graph and diff in the center).
+    enum Surface {
+        case panel
+        case base
+
+        func color(in colors: ThemeColors) -> NSColor {
+            self == .panel ? colors.bgPanel : colors.bgBase
+        }
+    }
+
+    static func apply(to tableView: NSTableView, theme: AppTheme, rowHeight: CGFloat = 24, surface: Surface = .panel) {
         tableView.style = .plain
         tableView.gridStyleMask = []
         tableView.focusRingType = .none
@@ -61,20 +93,20 @@ enum RetroListStyle {
         tableView.usesAutomaticRowHeights = false
         tableView.selectionHighlightStyle = .regular
         tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        tableView.backgroundColor = theme.colors.bgPanel
-        if let retro = tableView as? RetroTableView {
-            retro.colors = theme.colors
-        } else if let retro = tableView as? RetroOutlineView {
-            retro.colors = theme.colors
+        tableView.backgroundColor = surface.color(in: theme.colors)
+        if let table = tableView as? ListTableView {
+            table.colors = theme.colors
+        } else if let outline = tableView as? ListOutlineView {
+            outline.colors = theme.colors
         } else {
             tableView.enumerateAvailableRowViews { rowView, _ in
-                (rowView as? RetroRowView)?.colors = theme.colors
+                (rowView as? ListRowView)?.colors = theme.colors
             }
         }
         tableView.needsDisplay = true
     }
 
-    static func makeScrollView(documentView: NSView, theme: AppTheme) -> NSScrollView {
+    static func makeScrollView(documentView: NSView, theme: AppTheme, surface: Surface = .panel) -> NSScrollView {
         let scrollView = NSScrollView()
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = true
@@ -82,19 +114,20 @@ enum RetroListStyle {
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
         scrollView.documentView = documentView
-        applyScrollView(scrollView, theme: theme)
+        applyScrollView(scrollView, theme: theme, surface: surface)
         return scrollView
     }
 
-    static func applyScrollView(_ scrollView: NSScrollView, theme: AppTheme) {
+    static func applyScrollView(_ scrollView: NSScrollView, theme: AppTheme, surface: Surface = .panel) {
+        let color = surface.color(in: theme.colors)
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = theme.colors.bgPanel
+        scrollView.backgroundColor = color
         scrollView.contentView.drawsBackground = true
-        scrollView.contentView.backgroundColor = theme.colors.bgPanel
+        scrollView.contentView.backgroundColor = color
     }
 }
 
-/// Pointer tracking shared by `RetroTableView` and `RetroOutlineView`.
+/// Pointer tracking shared by `ListTableView` and `ListOutlineView`.
 @MainActor
 private final class RowHoverTracker {
     private var area: NSTrackingArea?
@@ -115,11 +148,11 @@ private final class RowHoverTracker {
     func set(_ newRow: Int, in table: NSTableView) {
         guard newRow != row else { return }
         if row >= 0, row < table.numberOfRows {
-            (table.rowView(atRow: row, makeIfNecessary: false) as? RetroRowView)?.isHovered = false
+            (table.rowView(atRow: row, makeIfNecessary: false) as? ListRowView)?.isHovered = false
         }
         row = newRow
         if row >= 0 {
-            (table.rowView(atRow: row, makeIfNecessary: false) as? RetroRowView)?.isHovered = true
+            (table.rowView(atRow: row, makeIfNecessary: false) as? ListRowView)?.isHovered = true
         }
     }
 
@@ -131,36 +164,36 @@ private final class RowHoverTracker {
     func clear(in table: NSTableView) {
         set(-1, in: table)
         table.enumerateAvailableRowViews { rowView, _ in
-            (rowView as? RetroRowView)?.isHovered = false
+            (rowView as? ListRowView)?.isHovered = false
         }
     }
 }
 
-/// A table that tracks the hovered row and vends `RetroRowView`s when its
+/// A table that tracks the hovered row and vends `ListRowView`s when its
 /// delegate does not supply row views.
-class RetroTableView: NSTableView {
+class ListTableView: NSTableView {
     private let tracker = RowHoverTracker()
 
     var hoveredRow: Int { tracker.row }
 
     var colors: ThemeColors? {
         didSet {
-            enumerateAvailableRowViews { rowView, _ in (rowView as? RetroRowView)?.colors = colors }
+            enumerateAvailableRowViews { rowView, _ in (rowView as? ListRowView)?.colors = colors }
         }
     }
 
-    func makeRetroRowView(row: Int) -> RetroRowView {
-        let rowView = RetroRowView()
+    func makeListRowView(row: Int) -> ListRowView {
+        let rowView = ListRowView()
         rowView.colors = colors
         rowView.isHovered = row == hoveredRow
         return rowView
     }
 
     /// AppKit asks for `rowViewKey` when the delegate supplies no row view;
-    /// answer with a `RetroRowView` instead of a plain one.
+    /// answer with a `ListRowView` instead of a plain one.
     override func makeView(withIdentifier identifier: NSUserInterfaceItemIdentifier, owner: Any?) -> NSView? {
         if let view = super.makeView(withIdentifier: identifier, owner: owner) { return view }
-        return identifier == NSTableView.rowViewIdentifier ? makeRetroRowView(row: -1) : nil
+        return identifier == NSTableView.rowViewIdentifier ? makeListRowView(row: -1) : nil
     }
 
     override func updateTrackingAreas() {
@@ -200,37 +233,47 @@ class RetroTableView: NSTableView {
 
     override func didAdd(_ rowView: NSTableRowView, forRow row: Int) {
         super.didAdd(rowView, forRow: row)
-        if let retro = rowView as? RetroRowView {
-            retro.colors = retro.colors ?? colors
-            retro.isHovered = row == hoveredRow
+        if let listRow = rowView as? ListRowView {
+            listRow.colors = listRow.colors ?? colors
+            listRow.isHovered = row == hoveredRow
         }
     }
 }
 
-/// The outline counterpart of `RetroTableView`.
-final class RetroOutlineView: NSOutlineView {
+/// The outline counterpart of `ListTableView`. Its cells draw their own
+/// disclosure chevrons and indentation, so the outline column's cell spans
+/// the full row and AppKit reserves no triangle space.
+final class ListOutlineView: NSOutlineView {
     private let tracker = RowHoverTracker()
 
     var hoveredRow: Int { tracker.row }
 
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect { .zero }
+
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        let frame = super.frameOfCell(atColumn: column, row: row)
+        guard column == 0 else { return frame }
+        return NSRect(x: 0, y: frame.minY, width: frame.maxX, height: frame.height)
+    }
+
     var colors: ThemeColors? {
         didSet {
-            enumerateAvailableRowViews { rowView, _ in (rowView as? RetroRowView)?.colors = colors }
+            enumerateAvailableRowViews { rowView, _ in (rowView as? ListRowView)?.colors = colors }
         }
     }
 
-    func makeRetroRowView(row: Int) -> RetroRowView {
-        let rowView = RetroRowView()
+    func makeListRowView(row: Int) -> ListRowView {
+        let rowView = ListRowView()
         rowView.colors = colors
         rowView.isHovered = row == hoveredRow
         return rowView
     }
 
     /// AppKit asks for `rowViewKey` when the delegate supplies no row view;
-    /// answer with a `RetroRowView` instead of a plain one.
+    /// answer with a `ListRowView` instead of a plain one.
     override func makeView(withIdentifier identifier: NSUserInterfaceItemIdentifier, owner: Any?) -> NSView? {
         if let view = super.makeView(withIdentifier: identifier, owner: owner) { return view }
-        return identifier == NSTableView.rowViewIdentifier ? makeRetroRowView(row: -1) : nil
+        return identifier == NSTableView.rowViewIdentifier ? makeListRowView(row: -1) : nil
     }
 
     override func updateTrackingAreas() {
@@ -270,9 +313,9 @@ final class RetroOutlineView: NSOutlineView {
 
     override func didAdd(_ rowView: NSTableRowView, forRow row: Int) {
         super.didAdd(rowView, forRow: row)
-        if let retro = rowView as? RetroRowView {
-            retro.colors = retro.colors ?? colors
-            retro.isHovered = row == hoveredRow
+        if let listRow = rowView as? ListRowView {
+            listRow.colors = listRow.colors ?? colors
+            listRow.isHovered = row == hoveredRow
         }
     }
 }

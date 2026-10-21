@@ -73,23 +73,27 @@ extension KeyChord {
         return (equivalent, modifiers)
     }
 
-    /// Compact keycap text: "⌘B", "⌃A P", "J", "⇧R", "↵".
-    func compactText(prefixKey: String) -> String {
+    /// Keycaps under Folio's K1 rule, one legend per cap: a chord is one cap
+    /// with its modifiers in macOS order (⌃⇧⌘) before the key; a prefix chord
+    /// is two caps, the prefix (⌃ + `prefixKey`) then the key; letters are
+    /// uppercase, named keys lowercase. `cmd+shift+o` → `["⇧⌘O"]`,
+    /// `prefix+shift+p` → `["⌃A", "⇧P"]`, `j` → `["J"]`, `escape` → `["esc"]`.
+    func keycaps(prefixKey: String) -> [String] {
         let names: [String: String] = [
-            " ": "Space", "\t": "⇥", "\r": "↵", "\u{1B}": "Esc", "\u{7F}": "⌫",
+            " ": "space", "\t": "⇥", "\r": "↵", "\u{1B}": "esc", "\u{7F}": "⌫",
             "\u{F700}": "↑", "\u{F701}": "↓", "\u{F702}": "←", "\u{F703}": "→",
         ]
         let rendered = names[key] ?? key.uppercased()
         let showsShift = shift && !KeyStroke.shiftInsensitiveKeys.contains(key) && !"~!@#$%^&*()_+{}|:\"<>?".contains(key)
-        var text = ""
-        if ctrl { text += "⌃" }
-        if showsShift { text += "⇧" }
-        if meta { text += "⌘" }
-        text += rendered
+        var cap = ""
+        if ctrl { cap += "⌃" }
+        if showsShift { cap += "⇧" }
+        if meta { cap += "⌘" }
+        cap += rendered
         if mode == .prefix {
-            return "⌃\(prefixKey.uppercased()) \(text)"
+            return ["⌃" + prefixKey.uppercased(), cap]
         }
-        return text
+        return [cap]
     }
 }
 

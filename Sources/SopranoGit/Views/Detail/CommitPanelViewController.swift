@@ -22,8 +22,8 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     let stashLoader = LatestRequestLoader<String, [ChangedFile]>()
 
     private let header: PanelHeaderView
-    private let copyKeycap: KeycapView
-    private let copyLabel = NSTextField(labelWithString: "")
+    /// Plain `Copy Y` button in the header: copies the shown SHA or stash.
+    let copyButton: KeyHintButton
     let infoView: CommitInfoView
     let tableView = PanelFileTableView()
     private var scrollView: NSScrollView!
@@ -41,7 +41,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
     init(controller: RepositoryController) {
         self.controller = controller
         header = PanelHeaderView(title: "Working Copy", theme: theme)
-        copyKeycap = KeycapView(text: "Y", theme: theme)
+        copyButton = KeyHintButton(title: "Copy", hint: nil, theme: theme, kind: .text)
         infoView = CommitInfoView(theme: theme)
         composer = CommitComposerView(theme: theme)
         super.init(nibName: nil, bundle: nil)
@@ -67,13 +67,16 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         tableView.allowsEmptySelection = true
         tableView.onOpenRow = { [weak self] row in self?.openFile(at: row) }
         tableView.setAccessibilityLabel("Changed files")
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: PanelFileCellView.rowHeight)
-        scrollView = RetroListStyle.makeScrollView(documentView: tableView, theme: theme)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: PanelFileCellView.rowHeight, surface: .panel)
+        scrollView = ListStyle.makeScrollView(documentView: tableView, theme: theme, surface: .panel)
         scrollView.setContentHuggingPriority(.init(1), for: .vertical)
         scrollView.setContentCompressionResistancePriority(.init(1), for: .vertical)
 
-        copyLabel.setContentHuggingPriority(.required, for: .horizontal)
-        header.setAccessoryViews([copyKeycap, copyLabel])
+        copyButton.symbolName = "doc.on.doc"
+        copyButton.target = self
+        copyButton.action = #selector(copyShown)
+        copyButton.setAccessibilityLabel("Copy SHA")
+        header.setAccessoryViews([copyButton])
 
         infoView.onSelectCommit = { [weak self] id in
             self?.controller.select(.commit(id))
@@ -138,20 +141,24 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         let colors = theme.colors
         view.layer?.backgroundColor = colors.bgPanel.cgColor
         header.apply(theme: theme)
-        copyKeycap.apply(theme: theme)
+        copyButton.apply(theme: theme)
         infoView.apply(theme: theme)
         composer.apply(theme: theme)
-        RetroListStyle.apply(to: tableView, theme: theme, rowHeight: PanelFileCellView.rowHeight)
-        RetroListStyle.applyScrollView(scrollView, theme: theme)
+        ListStyle.apply(to: tableView, theme: theme, rowHeight: PanelFileCellView.rowHeight, surface: .panel)
+        ListStyle.applyScrollView(scrollView, theme: theme, surface: .panel)
         refreshKeyHints()
         updateMessage()
     }
 
     private func refreshKeyHints() {
-        copyKeycap.text = PanelText.keycap("ref.copy") ?? "Y"
-        copyLabel.setRetroText("Copy", color: theme.colors.textMuted)
+        copyButton.hint = SettingsCenter.shared.keycaps(for: "ref.copy")
         reloadTablePreservingSelection()
         updateComposer()
+    }
+
+    @objc private func copyShown() {
+        guard let text = ActionRules.copyText(for: mode.selectionTarget) else { return }
+        GitActions.copyToPasteboard(text)
     }
 
     // MARK: - Region
@@ -184,7 +191,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         case .refs:
             updateHeader()
             if case let .commit(id) = mode, let detail = detailLoader.cached(id) {
-                infoView.show(detail, refs: refPills(at: id))
+                infoView.show(detail, refs: refPills(at: id), lane: graphLane(of: id))
             }
             updateComposer()
         case .stashes:
@@ -245,7 +252,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
             self.isLoading = false
             switch result {
             case let .success(detail):
-                self.infoView.show(detail, refs: self.refPills(at: id))
+                self.infoView.show(detail, refs: self.refPills(at: id), lane: self.graphLane(of: id))
                 self.infoView.isHidden = false
                 self.setRows(PanelRows.files(detail.files), resetSelection: true)
             case let .failure(error):
@@ -280,22 +287,30 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         }
     }
 
-    private func refPills(at id: String) -> [(String, RefPillView.Kind)] {
+    private func refPills(at id: String) -> [RefPillView.Ref] {
         let refs = controller.refs
-        var pills: [(String, RefPillView.Kind)] = []
+        var pills: [RefPillView.Ref] = []
         if case let .detached(commit) = refs.head, commit == id {
-            pills.append(("HEAD", .head))
+            pills.append(RefPillView.Ref(name: "HEAD", kind: .detachedHead, isHead: true))
         }
         for branch in refs.localBranches where branch.target == id {
-            pills.append((branch.name, branch.isHead ? .head : .localBranch))
+            pills.append(RefPillView.Ref(name: branch.name, kind: .localBranch, isHead: branch.isHead))
         }
         for branch in refs.remoteBranches where branch.target == id && !branch.name.hasSuffix("/HEAD") {
-            pills.append((branch.name, .remoteBranch))
+            pills.append(RefPillView.Ref(name: branch.name, kind: .remoteBranch))
         }
         for tag in refs.tags where tag.target == id {
-            pills.append((tag.name, .tag))
+            pills.append(RefPillView.Ref(name: tag.name, kind: .tag))
         }
-        return pills
+        // HEAD's ref leads, as in the graph.
+        return pills.filter(\.isHead) + pills.filter { !$0.isHead }
+    }
+
+    /// The graph lane the commit sits in; its pills share the lane color.
+    /// Lane 0 (the graphite trunk) until the graph has laid the commit out.
+    private func graphLane(of id: String) -> Int {
+        guard let model = workspace?.graph.model, let row = model.row(forID: id) else { return 0 }
+        return model.entries[row].layout.lane
     }
 
     private func updateHeader() {
@@ -311,18 +326,18 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
                 detail += " · \(operation.title.lowercased()) in progress"
             }
             header.detail = detail
-            copyKeycap.isHidden = true
-            copyLabel.isHidden = true
+            header.detailStyle = .count
+            copyButton.isHidden = true
         case let .commit(id):
             header.title = "Commit"
             header.detail = String(id.prefix(7))
-            copyKeycap.isHidden = false
-            copyLabel.isHidden = false
+            header.detailStyle = .sha
+            copyButton.isHidden = false
         case let .stash(stash):
             header.title = "Stash"
             header.detail = stash.reference
-            copyKeycap.isHidden = false
-            copyLabel.isHidden = false
+            header.detailStyle = .sha
+            copyButton.isHidden = false
         }
     }
 
@@ -343,9 +358,14 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
             color = theme.colors.textMuted
         }
         messageLabel.isHidden = text == nil
+        // Empty states are New York italic; a load error is plain prose.
         messageLabel.attributedStringValue = NSAttributedString(
             string: text ?? "",
-            attributes: [.font: RetroFont.body(12), .foregroundColor: color, .paragraphStyle: Self.centered]
+            attributes: [
+                .font: loadError == nil ? ChromeFont.empty : ChromeFont.label,
+                .foregroundColor: color,
+                .paragraphStyle: Self.centered,
+            ]
         )
     }
 
@@ -493,7 +513,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
         if rows.indices.contains(row), case .section = rows[row] {
             return NSTableRowView()
         }
-        return self.tableView.makeRetroRowView(row: row)
+        return self.tableView.makeListRowView(row: row)
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -797,7 +817,7 @@ final class CommitPanelViewController: NSViewController, FocusRegionController, 
 
     private func updateComposer() {
         guard isViewLoaded else { return }
-        composer.amendCheckbox.isEnabled = controller.refs.headCommit != nil && !isCommitting
+        composer.isAmendEnabled = controller.refs.headCommit != nil && !isCommitting
         composer.update(state: composerState)
     }
 

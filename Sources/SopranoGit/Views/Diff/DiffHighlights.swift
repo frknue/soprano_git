@@ -110,19 +110,3 @@ struct DiffHighlights: Equatable, Sendable {
         return result
     }
 }
-
-extension SyntaxTokenKind {
-    /// Exactly Soprano's editor mapping: `EditorPaneView.color(for:in:)` in
-    /// Soprano's `Sources/Soprano/Views/EditorPaneView.swift`.
-    func color(in colors: ThemeColors) -> NSColor {
-        switch self {
-        case .keyword, .tag: colors.accentStrong
-        case .string, .inserted: colors.success
-        case .comment: colors.textMuted
-        case .number, .attribute, .heading: colors.accent
-        case .type: colors.cyan
-        case .function, .key: colors.blue
-        case .deleted: colors.danger
-        }
-    }
-}

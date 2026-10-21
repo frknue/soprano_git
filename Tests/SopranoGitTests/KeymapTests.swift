@@ -111,10 +111,42 @@ struct KeymapTests {
         """)
 
         #expect(center.shortcutText(for: "repo.fetch") == "Prefix → Shift+F")
-        #expect(center.keycapText(for: "repo.fetch") == "⌃B ⇧F")
+        #expect(center.keycaps(for: "repo.fetch") == ["⌃B", "⇧F"])
+        #expect(center.keycaps(for: "branch.create") == nil)
+        #expect(center.keycaps(for: "graph.next") == ["J"])
         #expect(center.chords(for: "repo.fetch").count == 2)
         #expect(center.shortcutText(for: "branch.create") == nil)
         #expect(center.shortcutText(for: "graph.next") == "J")
         #expect(center.keymap.prefixKey == "b")
+    }
+
+    @Test func keycapsFollowK1WithOneCapPerChordAndPrefixSequencesAsSeparateCaps() throws {
+        let cases: [(String, [String])] = [
+            ("cmd+b", ["⌘B"]), ("cmd+shift+o", ["⇧⌘O"]), ("cmd+1", ["⌘1"]), ("ctrl+tab", ["⌃⇥"]),
+            ("ctrl+shift+tab", ["⌃⇧⇥"]), ("cmd+enter", ["⌘↵"]), ("cmd+shift+enter", ["⇧⌘↵"]), ("cmd+/", ["⌘/"]),
+            ("prefix+p", ["⌃A", "P"]), ("prefix+shift+s", ["⌃A", "⇧S"]), ("prefix+h", ["⌃A", "H"]),
+            ("j", ["J"]), ("shift+j", ["⇧J"]), ("shift+r", ["⇧R"]), (".", ["."]), ("?", ["?"]),
+            ("escape", ["esc"]), ("space", ["space"]), ("enter", ["↵"]), ("cmd+up", ["⌘↑"]), ("left", ["←"]),
+        ]
+        for (text, expected) in cases {
+            #expect(try #require(KeyChord.parse(text)).keycaps(prefixKey: "a") == expected, "\(text)")
+        }
+    }
+
+    @Test func thePrefixCapUsesTheConfiguredPrefixKeyInUppercase() throws {
+        #expect(try #require(KeyChord.parse("prefix+shift+p")).keycaps(prefixKey: "b") == ["⌃B", "⇧P"])
+    }
+
+    @Test func theShortcutSheetListsEachChordAsItsOwnCapGroup() throws {
+        let registry = CommandRegistry()
+        registry.register(commands)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sg-keymap-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let center = SettingsCenter(fileURL: directory.appendingPathComponent("settings.json"), registry: registry)
+        center.apply(text: "{}")
+        let entries = ShortcutSheetModel.sections(registry: registry, settings: center).flatMap(\.entries)
+        let fetch = try #require(entries.first { $0.id == "repo.fetch" })
+        #expect(fetch.keys == [["⌘L"], ["⌃A", "F"]])
+        #expect(fetch.matches("⌃a f"))
     }
 }

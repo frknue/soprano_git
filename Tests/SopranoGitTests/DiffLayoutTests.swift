@@ -57,7 +57,7 @@ struct DiffLayoutTests {
             let first = try await makeTwoHunkHarness(state: AppStateStore(defaults: defaults))
             try await open(.unstaged(path: "f.txt"), in: first)
             #expect(first.diff.layout == .unified)
-            #expect(first.diff.layoutToggleTitle == "Unified")
+            #expect(first.diff.layoutToggleTitle == "Inline")
             #expect(try first.perform("diff.nextHunk", focus: .diff))
             #expect(isScrolledToCurrentHunk(first))
             let unifiedRow = first.diff.currentHunkRow

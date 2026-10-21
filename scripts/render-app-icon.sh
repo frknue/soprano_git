@@ -1,7 +1,8 @@
 #!/bin/bash
-# Renders the app icon from scripts/render-app-icon.swift and writes
-# Sources/SopranoGit/Resources/AppIcon.icns. Usage: render-app-icon.sh [png-output]
-# The optional argument keeps a copy of the 1024×1024 master PNG at that path.
+# Renders the Folio app icon with scripts/render-app-icon.swift (Soprano-owned, vendored by
+# scripts/sync-soprano-chrome.sh) and writes Sources/SopranoGit/Resources/AppIcon.icns.
+# Usage: render-app-icon.sh [png-output]
+# The optional argument keeps a copy of the 1024×1024 render at that path.
 set -euo pipefail
 
 if [[ $# -gt 1 ]]; then
@@ -22,16 +23,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-master_png="$work_dir/app-icon.png"
-swift "$script_dir/render-app-icon.swift" "$master_png"
-
 iconset="$work_dir/AppIcon.iconset"
-mkdir -p "$iconset"
-for size in 16 32 128 256 512; do
-    /usr/bin/sips -z "$size" "$size" "$master_png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
-    double=$((size * 2))
-    /usr/bin/sips -z "$double" "$double" "$master_png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
-done
+swift "$script_dir/render-app-icon.swift" git "$iconset"
 
 staged_icns="$work_dir/AppIcon.icns"
 /usr/bin/iconutil -c icns -o "$staged_icns" "$iconset"
@@ -40,6 +33,6 @@ echo "Wrote $icns_path"
 
 if [[ $# -eq 1 ]]; then
     mkdir -p "$(dirname "$1")"
-    cp "$master_png" "$1"
+    cp "$iconset/icon_512x512@2x.png" "$1"
     echo "Wrote $1"
 fi

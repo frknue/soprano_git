@@ -1,7 +1,7 @@
 # Soprano Git
 
 Keyboard-first Git client for macOS in the Soprano family: GitKraken's layout and shortcuts
-(commit graph, left ref panel, right commit panel) in Soprano's "Mission Control" chrome.
+(commit graph, left ref panel, right commit panel) in Soprano's Folio chrome.
 Swift 6 + programmatic AppKit (no storyboards/xibs/SwiftUI), SPM, macOS 14+, drives the git
 CLI. Shipped as a hand-packaged `.app` via `scripts/package-app.sh`. GitHub:
 [`frknue/soprano_git`](https://github.com/frknue/soprano_git) (public).
@@ -19,7 +19,7 @@ swift test --filter GraphLayoutTests
 ./scripts/dev.sh --build-only        # package .build/debug/Soprano Git Dev.app (com.soprano.git.dev)
 ./scripts/install.sh                 # release build → /Applications/Soprano Git.app
 scripts/make-fixture-repo.sh /tmp/sg-fx [--conflict]   # disposable repo at /tmp/sg-fx/work
-.build/debug/SopranoGit snapshot --repo /tmp/sg-fx/work --out /tmp/shot.png [--select …] [--diff …] [--focus …] [--keys "…"]
+.build/debug/SopranoGit snapshot --repo /tmp/sg-fx/work --out /tmp/shot.png [--theme folio-ink] [--select …] [--diff …] [--focus …] [--keys "…"]
 ```
 
 `ld: warning: building for macOS-14.0 …` link warnings are expected. There is no linter or
@@ -73,9 +73,12 @@ not built yet.
 
 ## Conventions
 
-- Chrome comes from Soprano: square corners, `ThemeColors` tokens only, Departure Mono via
-  `RetroFont.display` at 11 or 22 pt only (small caps; never uppercase strings by hand),
-  `RetroFont.body` for running text. Build on `Views/Common` and the `Retro*` components.
+- Chrome is Folio, vendored from Soprano (`Vendored/Chrome.swift`, `Theme.swift`): `ThemeColors`
+  tokens only; `ChromeFont` roles (SF Pro for chrome and prose, SF Mono for paths, SHAs, code
+  and diff, New York only at 15 pt and up, nothing below 11 pt); `Chrome*` components and
+  `Chrome.Radius` / `Chrome.Space`; K1 keycaps from `SettingsCenter.shared.keycaps(for:)`.
+  Build on `Views/Common`. Visual spec: `docs/ARCHITECTURE.md` → Layout and visual design.
+  Snapshots default to Folio Paper; check Ink with `--theme folio-ink`.
 - New actions: add an `AppCommand` to the owning module's `…Commands.all`, add its row to
   the binding table in `docs/ARCHITECTURE.md`, and keep the README shortcut list in sync.
 - Single-key bindings are scoped to a focus region; chords without ⌘/⌃ never fire in text
@@ -95,8 +98,8 @@ not built yet.
 - `Sources/SopranoGit/Vendored/` is copied from Soprano by `scripts/sync-soprano-chrome.sh`
   (committed Soprano state only; source commit in `Vendored/SOPRANO_COMMIT`). Never edit
   it here: change Soprano, commit there, re-run the script.
-- `SopranoResources` (App/) keeps Soprano's name so vendored files compile unchanged; the
-  SPM resource bundle is `SopranoGit_SopranoGit.bundle`.
+- `AppResources` (App/) only serves the AppIcon fallback; the SPM resource bundle is
+  `SopranoGit_SopranoGit.bundle`.
 - GUI apps start with a minimal PATH; `GitRunner` prepends Homebrew/user tool dirs and
   `git.extraPath` so hooks find node/bun. Passwords go through the app binary in `askpass`
   mode (`SOPRANO_GIT_ASKPASS=1`).

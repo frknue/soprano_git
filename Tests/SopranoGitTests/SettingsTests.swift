@@ -201,12 +201,72 @@ struct SettingsTests {
         #expect(center.issues.first?.message.hasPrefix("Could not update") == true)
     }
 
+    private func resolve(_ setting: String, _ text: String?, _ system: AppTheme.Appearance) -> String {
+        ThemeCenter.resolveThemeID(setting: setting, sopranoSettingsText: text, systemAppearance: system)
+    }
+
+    @Test func theThemeSettingAcceptsFolioAndPinnedIdsAndWarnsOnTheRemovedOnes() throws {
+        for id in ["soprano", "folio", "folio-paper", "folio-ink", "nord"] {
+            let resolved = try SettingsResolver.resolve(text: #"{ "theme": "\#(id)" }"#)
+            #expect(resolved.issues.isEmpty)
+            #expect(resolved.settings.theme == id)
+        }
+        let removed = try SettingsResolver.resolve(text: #"{ "theme": "mission-control" }"#)
+        #expect(removed.settings.theme == "soprano")
+        #expect(removed.issues.count == 1)
+        #expect(removed.issues.first?.message.contains("soprano, folio, folio-paper, folio-ink") == true)
+        #expect(SettingsFile.template.contains(#""folio", "folio-paper", "folio-ink""#))
+    }
+
     @Test func theSopranoThemeSettingResolvesFromSopranosSettingsText() throws {
-        #expect(ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: #"{ "theme": "dracula" } // x"#) == "dracula")
-        #expect(ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: nil) == "mission-control")
-        #expect(ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: #"{ "theme": "vaporwave" }"#) == "mission-control")
-        #expect(ThemeCenter.resolveThemeID(setting: "soprano", sopranoSettingsText: "{ broken") == "mission-control")
-        #expect(ThemeCenter.resolveThemeID(setting: "nord", sopranoSettingsText: #"{ "theme": "dracula" }"#) == "nord")
+        #expect(resolve("soprano", #"{ "theme": "dracula" } // x"#, .light) == "dracula")
+        #expect(resolve("soprano", #"{ "theme": "dracula", "appearance": "light" }"#, .dark) == "dracula")
+        #expect(resolve("soprano", #"{ "theme": "folio-ink" }"#, .light) == "folio-ink")
+    }
+
+    @Test func sopranoFallbacksResolveToFolioByTheSystemAppearance() throws {
+        for text in [nil, #"{ "theme": "vaporwave" }"#, #"{ "theme": "mission-control" }"#, "{ broken", #"{ "theme": 4 }"#, "{}"] {
+            #expect(resolve("soprano", text, .light) == "folio-paper")
+            #expect(resolve("soprano", text, .dark) == "folio-ink")
+        }
+    }
+
+    @Test func sopranosAppearanceKeyPicksPaperOrInkForFolio() throws {
+        #expect(resolve("soprano", #"{ "theme": "folio", "appearance": "light" }"#, .dark) == "folio-paper")
+        #expect(resolve("soprano", #"{ "theme": "folio", "appearance": "dark" }"#, .light) == "folio-ink")
+        #expect(resolve("soprano", #"{ "theme": "folio", "appearance": "system" }"#, .dark) == "folio-ink")
+        #expect(resolve("soprano", #"{ "theme": "folio", "appearance": "system" }"#, .light) == "folio-paper")
+        // A missing theme key is Folio; an unknown appearance follows the system.
+        #expect(resolve("soprano", #"{ "appearance": "dark" }"#, .light) == "folio-ink")
+        #expect(resolve("soprano", #"{ "theme": "folio", "appearance": "sepia" }"#, .dark) == "folio-ink")
+        #expect(resolve("soprano", #"{ "theme": "folio", "appearance": "sepia" }"#, .light) == "folio-paper")
+    }
+
+    @Test func ownThemeIdsIgnoreSopranoAndFollowTheSystemOnlyForFolio() throws {
+        let soprano = #"{ "theme": "dracula", "appearance": "dark" }"#
+        #expect(resolve("folio", soprano, .light) == "folio-paper")
+        #expect(resolve("folio", soprano, .dark) == "folio-ink")
+        #expect(resolve("folio-paper", soprano, .dark) == "folio-paper")
+        #expect(resolve("folio-ink", soprano, .light) == "folio-ink")
+        #expect(resolve("nord", soprano, .light) == "nord")
+        #expect(resolve("neon", soprano, .light) == "folio-paper")
+        #expect(resolve("neon", soprano, .dark) == "folio-ink")
+    }
+
+    @Test func aForcedThemeWinsOverTheSetting() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let center = ThemeCenter(sopranoSettingsURL: directory.appendingPathComponent("settings.json"))
+        center.apply(setting: "nord", watch: false)
+        #expect(center.theme.id == "nord")
+
+        center.forcedThemeID = "folio-ink"
+        #expect(center.theme.id == "folio-ink")
+        center.apply(setting: "dracula", watch: false)
+        #expect(center.theme.id == "folio-ink")
+
+        center.forcedThemeID = nil
+        #expect(center.theme.id == "dracula")
     }
 
     @Test func theSopranoThemeUpdatesLiveWhenSopranosFileChanges() async throws {
