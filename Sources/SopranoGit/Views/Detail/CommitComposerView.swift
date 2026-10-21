@@ -19,9 +19,9 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
     private let topRule = ChromeRuleView(axis: .horizontal)
     private let heading: ChromeEyebrowView
     let amendCheckbox: ChromeCheckbox
-    private let amendLabel = NSTextField(labelWithString: "")
-    private let summaryBox: ChromeFieldView
-    let summaryField = NSTextField()
+    let amendLabel = NSTextField(labelWithString: "")
+    let summaryBox: ChromeFieldView
+    let summaryField = FocusReportingTextField()
     private let counterLabel = NSTextField(labelWithString: "")
     private let descriptionBox: ChromeFieldView
     private let descriptionScroll = NSScrollView()
@@ -140,6 +140,11 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
         summaryField.cell?.isScrollable = true
         summaryField.cell?.wraps = false
         summaryField.delegate = self
+        summaryField.onFocusChange = { [weak self] focused in
+            guard let self else { return }
+            summaryBox.isFocused = focused
+            if focused { ChromeFieldView.styleEditor(of: summaryField, colors: theme.colors) }
+        }
         summaryField.setAccessibilityLabel("Commit summary")
         counterLabel.alignment = .right
         counterLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -317,15 +322,6 @@ final class CommitComposerView: NSView, NSTextFieldDelegate, NSTextViewDelegate 
 
     func controlTextDidChange(_ obj: Notification) {
         textChanged()
-    }
-
-    func controlTextDidBeginEditing(_ obj: Notification) {
-        summaryBox.isFocused = true
-        ChromeFieldView.styleEditor(of: summaryField, colors: theme.colors)
-    }
-
-    func controlTextDidEndEditing(_ obj: Notification) {
-        summaryBox.isFocused = false
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {

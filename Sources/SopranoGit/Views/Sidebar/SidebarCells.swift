@@ -41,6 +41,8 @@ final class SidebarCellView: NSTableCellView {
     private(set) var iconName: String?
     /// Whether the chevron points down.
     private(set) var isExpanded = false
+    /// The chevron button (tests press it).
+    var disclosureButton: NSButton { disclosure }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)

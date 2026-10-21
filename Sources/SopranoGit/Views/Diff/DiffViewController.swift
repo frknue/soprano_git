@@ -773,7 +773,7 @@ final class DiffTableView: ListTableView {
 }
 
 /// The diff's horizontal text scroller: AppKit's tracking (knob drag, clicks
-/// in the slot), drawn as a square `textMuted` bar without a slot.
+/// in the slot), drawn as a capsule `scrollbarThumb` knob without a slot.
 final class DiffTextScroller: NSScroller {
     var colors: ThemeColors? {
         didSet { needsDisplay = true }
@@ -790,8 +790,9 @@ final class DiffTextScroller: NSScroller {
     override func draw(_ dirtyRect: NSRect) {
         guard let colors else { return }
         let knob = rect(for: .knob)
-        colors.textMuted.withAlphaComponent(0.45).setFill()
-        NSRect(x: knob.minX + 2, y: bounds.midY - 3, width: max(0, knob.width - 4), height: 6).fill(using: .sourceOver)
+        colors.scrollbarThumb.setFill()
+        let bar = NSRect(x: knob.minX + 2, y: bounds.midY - 3, width: max(0, knob.width - 4), height: 6)
+        NSBezierPath(roundedRect: bar, xRadius: bar.height / 2, yRadius: bar.height / 2).fill()
     }
 }
 

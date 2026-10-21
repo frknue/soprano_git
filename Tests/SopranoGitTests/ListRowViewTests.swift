@@ -37,6 +37,15 @@ struct ListRowViewTests {
         #expect(table.hoveredRow == -1)
     }
 
+    @Test func aShorterContentHeightAlignsThePillToTheRowsBottomContent() {
+        let row = ListRowView(frame: NSRect(x: 0, y: 0, width: 200, height: 32))
+        #expect(row.pillRect.height == 28)
+        row.contentHeight = 24
+        #expect(row.pillRect.height == 20)
+        let contentTop: CGFloat = row.isFlipped ? 8 : 0
+        #expect(row.pillRect.minY == contentTop + ListRowView.pillVerticalInset)
+    }
+
     @Test func listStyleStripsChromeAndUsesTheSurfaceColor() {
         let table = ListTableView()
         ListStyle.apply(to: table, theme: .folioPaper, rowHeight: 22)

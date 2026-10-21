@@ -178,13 +178,13 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
     /// The hint row: open, open selected, move, commands, shortcuts, each with
     /// its live K1 caps; unbound commands drop out.
     static func hints(settings: SettingsCenter) -> [HintsView.Hint] {
-        let move = (settings.keycaps(for: "welcome.next") ?? []) + (settings.keycaps(for: "welcome.previous") ?? [])
-        let entries: [([String]?, String)] = [
-            (settings.keycaps(for: "repo.open"), "Open"),
-            (settings.keycaps(for: "welcome.open"), "Open Selected"),
+        let move = [settings.keycaps(for: "welcome.next"), settings.keycaps(for: "welcome.previous")].compactMap { $0 }
+        let entries: [([[String]]?, String)] = [
+            (settings.keycaps(for: "repo.open").map { [$0] }, "Open"),
+            (settings.keycaps(for: "welcome.open").map { [$0] }, "Open Selected"),
             (move.isEmpty ? nil : move, "Move"),
-            (settings.keycaps(for: "palette.open"), "Commands"),
-            (settings.keycaps(for: "help.shortcuts"), "Shortcuts"),
+            (settings.keycaps(for: "palette.open").map { [$0] }, "Commands"),
+            (settings.keycaps(for: "help.shortcuts").map { [$0] }, "Shortcuts"),
         ]
         return entries.compactMap { caps, label in caps.map { HintsView.Hint(caps: $0, label: label) } }
     }
@@ -247,17 +247,18 @@ final class WelcomeViewController: NSViewController, FocusRegionController, NSTa
 }
 
 /// A recent repository: name (SF Pro 13) over its path (SF Mono 11 muted),
-/// with the row's number as a trailing cap.
-private final class RecentRepositoryCell: NSTableCellView {
+/// with the row's number as a trailing muted count (not a cap: no digit
+/// opens a recent).
+final class RecentRepositoryCell: NSTableCellView {
     private let nameLabel = NSTextField(labelWithString: "")
     private let pathLabel = NSTextField(labelWithString: "")
-    private var indexCap: ChromeKeycapView?
+    private let indexLabel = NSTextField(labelWithString: "")
 
     init() {
         super.init(frame: .zero)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         nameLabel.lineBreakMode = .byTruncatingTail
-        for view in [nameLabel, pathLabel] {
+        for view in [nameLabel, pathLabel, indexLabel] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -269,6 +270,8 @@ private final class RecentRepositoryCell: NSTableCellView {
             pathLabel.leadingAnchor.constraint(equalTo: nameLabel.leadingAnchor),
             pathLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 1),
             pathLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -40),
+            indexLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            indexLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
@@ -281,15 +284,10 @@ private final class RecentRepositoryCell: NSTableCellView {
         let colors = theme.colors
         nameLabel.setChromeText(name, font: ChromeFont.row, color: dimmed ? colors.textMuted : colors.textPrimary)
         pathLabel.setChromeText(path, font: ChromeFont.monoSmall, color: colors.textMuted)
-        indexCap?.removeFromSuperview()
-        indexCap = nil
-        guard let index else { return }
-        let cap = ChromeKeycapView(legend: String(index), theme: theme, style: .small, tone: .muted)
-        addSubview(cap)
-        NSLayoutConstraint.activate([
-            cap.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            cap.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        indexCap = cap
+        indexLabel.setChromeText(index.map(String.init) ?? "", font: ChromeFont.count, color: colors.textMuted)
+        indexLabel.isHidden = index == nil
     }
+
+    /// The trailing row number, nil when hidden (tests).
+    var indexText: String? { indexLabel.isHidden ? nil : indexLabel.stringValue }
 }

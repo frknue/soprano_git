@@ -19,6 +19,28 @@ struct GraphStyleTests {
         #expect(style.lanes.first == theme.colors.textMuted, "lane 0 is the graphite trunk")
     }
 
+    /// Every theme's eight lanes are distinct from each other and from its
+    /// accent (CIELAB ΔE ≥ `AppTheme.minimumLaneDistance`), so no two branches
+    /// share a color and no lane reads as the focus mark.
+    @Test(arguments: AppTheme.allThemes.map(\.id))
+    func everyThemeGivesEightDistinctLanesApartFromTheAccent(themeID: String) {
+        let theme = theme(themeID)
+        let lanes = GraphStyle(theme: theme).lanes
+        #expect(lanes.count == 8, "\(themeID): \(lanes.count) lanes")
+        for (index, lane) in lanes.enumerated() {
+            #expect(
+                lane.labDistance(to: theme.colors.accent) >= AppTheme.minimumLaneDistance,
+                "\(themeID): lane \(index) is too close to the accent"
+            )
+            for (otherIndex, other) in lanes.enumerated() where otherIndex > index {
+                #expect(
+                    lane.labDistance(to: other) >= AppTheme.minimumLaneDistance,
+                    "\(themeID): lanes \(index) and \(otherIndex) are too close"
+                )
+            }
+        }
+    }
+
     /// Folio's lanes use no accent slot; a third-party theme's accent may coincide
     /// with one of its signal colors.
     @Test(arguments: [AppTheme.folioPaper.id, AppTheme.folioInk.id])

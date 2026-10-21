@@ -51,8 +51,21 @@ final class ListRowView: NSTableRowView {
         ChromeSelectionPill.draw(showsFocus ? .selected : .selectedUnfocused, in: pillRect, colors: colors)
     }
 
-    private var pillRect: NSRect {
-        bounds.insetBy(dx: 0, dy: Self.pillVerticalInset)
+    /// Height of the row's content when it is shorter than the row (ref
+    /// section rows carry their top margin inside the row): the pill and tick
+    /// align to the bottom `contentHeight` points. Nil = the whole row.
+    var contentHeight: CGFloat? {
+        didSet { if oldValue != contentHeight { needsDisplay = true } }
+    }
+
+    /// The rect the pill is drawn in (tests).
+    var pillRect: NSRect {
+        var content = bounds
+        if let contentHeight, contentHeight < bounds.height {
+            content.size.height = contentHeight
+            if isFlipped { content.origin.y = bounds.maxY - contentHeight }
+        }
+        return content.insetBy(dx: 0, dy: Self.pillVerticalInset)
     }
 }
 

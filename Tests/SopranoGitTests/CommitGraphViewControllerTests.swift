@@ -269,4 +269,101 @@ struct CommitGraphViewControllerTests {
         reopened.loadViewIfNeeded()
         #expect(reopened.width(of: .author) == 180)
     }
+
+    @Test func theDefaultDateColumnFitsTheWidestDateOfEachStyleAndFollowsStyleChanges() async throws {
+        let harness = try await makeGraph { script in
+            try await script.commit("first", ["a.txt": "a"])
+        }
+        defer { harness.sandbox.remove() }
+        let graph = harness.graph
+        let font = GraphStyle.metaFont
+        func needed(_ sample: String) -> CGFloat {
+            ceil((sample as NSString).size(withAttributes: [.font: font]).width) + GraphMetrics.cellPadding + GraphMetrics.textTrailingPadding
+        }
+        #expect(CommitGraphViewController.Column.date.defaultWidth(dateStyle: .relative) >= needed("Nov 17 2023"))
+        #expect(CommitGraphViewController.Column.date.defaultWidth(dateStyle: .relative) >= needed("Sep 28 2023"))
+        #expect(CommitGraphViewController.Column.date.defaultWidth(dateStyle: .absolute) >= needed("2026-10-20 21:48"))
+
+        var style = AppSettings.DateStyle.relative
+        graph.dateStyle = { style }
+        graph.settingsChanged()
+        #expect(graph.width(of: .date) == CommitGraphViewController.Column.date.defaultWidth(dateStyle: .relative))
+        style = .absolute
+        graph.settingsChanged()
+        #expect(graph.width(of: .date) == CommitGraphViewController.Column.date.defaultWidth(dateStyle: .absolute))
+
+        let column = try #require(graph.tableView.tableColumns.first { $0.identifier.rawValue == "date" })
+        column.width = 70
+        style = .relative
+        graph.settingsChanged()
+        #expect(graph.width(of: .date) == 70, "a user-resized width wins")
+    }
+
+    @Test func theSelectedRowsMatchIsAccentOnlyWhileTheTableHasFocus() async throws {
+        let harness = try await makeGraph { script in
+            try await script.commit("feat: parser", ["a.txt": "1"])
+            try await script.commit("Feat: lexer", ["a.txt": "2"])
+        }
+        defer { harness.sandbox.remove() }
+        let graph = harness.graph
+        let controller = harness.controller
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 400), styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView = graph.view
+        window.layoutIfNeeded()
+        defer { window.contentView = nil }
+        let row = { (summary: String) in
+            graph.model.row(for: .commit(controller.commits.first(where: { $0.summary == summary })!.id))!
+        }
+        let column = graph.tableView.column(withIdentifier: NSUserInterfaceItemIdentifier("message"))
+        func match(_ summary: String) throws -> [NSAttributedString.Key: Any] {
+            let cell = try #require(graph.tableView.view(atColumn: column, row: row(summary), makeIfNecessary: true) as? GraphTextView)
+            let text = try #require(cell.attributedText)
+            return text.attributes(at: 0, effectiveRange: nil)
+        }
+        let style = graph.style
+
+        graph.openSearch()
+        graph.search("feat")
+        #expect(graph.tableView.selectedRow == row("Feat: lexer"))
+        #expect(!graph.tableView.hasFocus, "typing in the search field")
+        #expect(try match("Feat: lexer")[.foregroundColor] as? NSColor == style.matchText, "unfocused list: ink")
+        #expect(try match("Feat: lexer")[.font] as? NSFont == style.matchFont)
+
+        window.makeFirstResponder(graph.tableView)
+        #expect(graph.tableView.hasFocus)
+        #expect(try match("Feat: lexer")[.foregroundColor] as? NSColor == style.matchOnSelection, "focused selected row: accent")
+        #expect(try match("feat: parser")[.foregroundColor] as? NSColor == style.matchText, "other rows: ink")
+        #expect(try match("feat: parser")[.font] as? NSFont == style.matchFont, "other rows: Semibold")
+        #expect(try match("feat: parser")[.backgroundColor] == nil, "no yellow wash")
+
+        window.makeFirstResponder(nil)
+        #expect(!graph.tableView.hasFocus)
+        #expect(try match("Feat: lexer")[.foregroundColor] as? NSColor == style.matchText)
+    }
+
+    @Test func aThemeChangeRestylesEveryPreparedRowNotOnlyVisibleOnes() async throws {
+        let harness = try await makeGraph { script in
+            for index in 0 ..< 40 {
+                try await script.commit("commit \(index)", ["a.txt": "\(index)"])
+            }
+        }
+        defer { harness.sandbox.remove() }
+        let graph = harness.graph
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 200), styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView = graph.view
+        window.layoutIfNeeded()
+        defer { window.contentView = nil }
+        graph.apply(theme: .folioPaper)
+        let column = graph.tableView.column(withIdentifier: NSUserInterfaceItemIdentifier("message"))
+        let offscreen = graph.model.count - 1
+        #expect(!graph.tableView.rows(in: graph.tableView.visibleRect).contains(offscreen))
+        #expect(graph.tableView.view(atColumn: column, row: offscreen, makeIfNecessary: true) is GraphTextView)
+
+        graph.apply(theme: .folioInk)
+
+        let prepared = try #require(graph.tableView.view(atColumn: column, row: offscreen, makeIfNecessary: false) as? GraphTextView)
+        let color = prepared.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        #expect(color == AppTheme.folioInk.colors.textPrimary)
+        #expect(color != AppTheme.folioPaper.colors.textPrimary)
+    }
 }

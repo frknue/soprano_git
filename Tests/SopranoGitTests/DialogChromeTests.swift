@@ -22,11 +22,21 @@ struct DialogChromeTests {
     @Test func hintsUseK1Caps() {
         let confirm = panel(.confirm, confirmTitle: "Delete")
         #expect(confirm.hintsView.hints == [
-            HintsView.Hint(caps: ["↵"], label: "Delete"),
-            HintsView.Hint(caps: ["esc"], label: "Cancel"),
+            HintsView.Hint(caps: [["↵"]], label: "Delete"),
+            HintsView.Hint(caps: [["esc"]], label: "Cancel"),
         ])
         let choose = panel(.choose([DialogOption(title: "A"), DialogOption(title: "B")]))
-        #expect(choose.hintsView.hints.first == HintsView.Hint(caps: ["J", "K"], label: "Move"))
+        #expect(choose.hintsView.hints.first == HintsView.Hint(caps: [["J"], ["K"]], label: "Move"))
+    }
+
+    @Test func alternativeKeysAreSeparateGroupsReadAsOr() throws {
+        let hints = HintsView(hints: [HintsView.Hint(caps: [["J"], ["K"]], label: "Move"), HintsView.Hint(caps: [["⌃A", "P"]], label: "Pull")], theme: .folioPaper)
+        let pairs = hints.arrangedSubviews.compactMap { $0 as? NSStackView }
+        let move = try #require(pairs.first?.arrangedSubviews.first as? NSStackView)
+        #expect(move.arrangedSubviews.compactMap { ($0 as? ChromeKeycapGroupView)?.caps } == [["J"], ["K"]])
+        #expect(move.accessibilityLabel() == "J or K")
+        let pull = try #require(pairs.last?.arrangedSubviews.first as? NSStackView)
+        #expect(pull.accessibilityLabel() == "⌃A then P")
     }
 
     @Test func theSelectedOptionIsTheFocusedPillWithItsTick() {
@@ -55,5 +65,16 @@ struct DialogChromeTests {
         let ink = DialogPanel(spec: DialogSpec(title: "T", message: nil, confirmTitle: "OK", isDestructive: false, kind: .confirm), theme: .folioInk)
         #expect(paper.appearance?.name == AppTheme.Appearance.light.nsAppearance.name)
         #expect(ink.appearance?.name == AppTheme.Appearance.dark.nsAppearance.name)
+    }
+
+    @Test func theSurfaceReappliesItsShadowWhenTheLayerUpdates() throws {
+        let root = FloatingSurfaceView(radius: Chrome.Radius.popover)
+        root.apply(theme: .folioPaper)
+        #expect(root.surface.wantsUpdateLayer)
+        let layer = try #require(root.surface.layer)
+        layer.shadowOpacity = 0
+        root.surface.updateLayer()
+        #expect(layer.shadowOpacity > 0)
+        #expect(layer.backgroundColor == AppTheme.folioPaper.colors.bgRaised.cgColor)
     }
 }

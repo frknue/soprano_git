@@ -286,11 +286,11 @@ final class DialogPanel: NSPanel, NSTextFieldDelegate {
 
         var hints: [HintsView.Hint] = []
         if case .choose = spec.kind {
-            hints.append(HintsView.Hint(caps: ["J", "K"], label: "Move"))
+            hints.append(HintsView.Hint(caps: [["J"], ["K"]], label: "Move"))
         } else {
-            hints.append(HintsView.Hint(caps: ["↵"], label: spec.confirmTitle))
+            hints.append(HintsView.Hint(caps: [["↵"]], label: spec.confirmTitle))
         }
-        hints.append(HintsView.Hint(caps: ["esc"], label: spec.showsCancel ? "Cancel" : "Close"))
+        hints.append(HintsView.Hint(caps: [["esc"]], label: spec.showsCancel ? "Cancel" : "Close"))
         hintsView = HintsView(hints: hints, theme: theme)
         hintsView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -554,23 +554,23 @@ class FloatingSurfaceView: NSView {
     static var horizontalMargin: CGFloat { margins.left + margins.right }
     static var verticalMargin: CGFloat { margins.top + margins.bottom }
 
-    let surface = NSView()
-    private let radius: CGFloat
+    /// Where content goes.
+    var surface: NSView { surfaceView }
+    private let surfaceView: SurfaceView
 
     init(radius: CGFloat) {
-        self.radius = radius
+        surfaceView = SurfaceView(radius: radius)
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = false
-        surface.wantsLayer = true
-        surface.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(surface)
+        surfaceView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(surfaceView)
         let margins = Self.margins
         NSLayoutConstraint.activate([
-            surface.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margins.left),
-            surface.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margins.right),
-            surface.topAnchor.constraint(equalTo: topAnchor, constant: margins.top),
-            surface.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margins.bottom),
+            surfaceView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margins.left),
+            surfaceView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margins.right),
+            surfaceView.topAnchor.constraint(equalTo: topAnchor, constant: margins.top),
+            surfaceView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margins.bottom),
         ])
     }
 
@@ -580,12 +580,43 @@ class FloatingSurfaceView: NSView {
     }
 
     func apply(theme: AppTheme) {
-        guard let layer = surface.layer else { return }
-        let colors = theme.colors
-        ChromeSurface.applyFloating(to: layer, colors: colors, radius: radius, shadow: colors.shadowE3)
-        layer.backgroundColor = colors.bgRaised.cgColor
-        layer.borderWidth = Chrome.hairline
-        layer.borderColor = colors.borderSubtle.cgColor
+        surfaceView.colors = theme.colors
+    }
+
+    /// The rounded `bgRaised` surface. AppKit resets a backing layer's shadow
+    /// when the effective appearance changes, so the e3 shadow, fill and edge
+    /// are (re)applied in `updateLayer`, as the vendored palette does.
+    private final class SurfaceView: NSView {
+        var colors: ThemeColors? {
+            didSet { needsDisplay = true }
+        }
+        private let radius: CGFloat
+
+        init(radius: CGFloat) {
+            self.radius = radius
+            super.init(frame: .zero)
+            wantsLayer = true
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) is not supported")
+        }
+
+        override var wantsUpdateLayer: Bool { true }
+
+        override func updateLayer() {
+            guard let layer, let colors else { return }
+            ChromeSurface.applyFloating(to: layer, colors: colors, radius: radius, shadow: colors.shadowE3)
+            layer.backgroundColor = colors.bgRaised.cgColor
+            layer.borderWidth = Chrome.hairline
+            layer.borderColor = colors.borderSubtle.cgColor
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            needsDisplay = true
+        }
     }
 }
 

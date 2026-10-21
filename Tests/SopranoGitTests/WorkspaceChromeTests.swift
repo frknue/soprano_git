@@ -14,7 +14,8 @@ struct WorkspaceChromeTests {
         return (center, directory)
     }
 
-    private func hint(_ caps: [String], _ label: String) -> HintsView.Hint {
+    /// One cap group per alternative chord.
+    private func hint(_ caps: [String]..., label: String) -> HintsView.Hint {
         HintsView.Hint(caps: caps, label: label)
     }
 
@@ -46,7 +47,7 @@ struct WorkspaceChromeTests {
     @Test func graphSidebarAndDetailShowTheGlobalHintsWithTheirShortestCaps() {
         let (settings, directory) = makeSettings()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let expected = [hint(["⌘P"], "Commands"), hint(["⌃A"], "Prefix"), hint(["?"], "Shortcuts")]
+        let expected = [hint(["⌘P"], label: "Commands"), hint(["⌃A"], label: "Prefix"), hint(["?"], label: "Shortcuts")]
 
         for region: FocusRegion? in [.graph, .sidebar, .detail, nil] {
             #expect(WorkspaceStatusBarView.hints(for: region, settings: settings) == expected)
@@ -58,24 +59,26 @@ struct WorkspaceChromeTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         #expect(WorkspaceStatusBarView.hints(for: .diff, settings: settings) == [
-            hint(["J", "K"], "change"),
-            hint(["⇧J", "⇧K"], "file"),
-            hint(["V"], "split"),
-            hint(["esc"], "close"),
+            hint(["J"], ["K"], label: "change"),
+            hint(["⇧J"], ["⇧K"], label: "file"),
+            hint(["V"], label: "split"),
+            hint(["esc"], label: "close"),
         ])
     }
 
     @Test func statusBarHintsFollowTheKeyBindings() {
         let (settings, directory) = makeSettings("""
-        { "keybindings": { "prefixKey": "b", "bindings": { "palette.open": "cmd+shift+k", "diff.toggleLayout": null } } }
+        { "keybindings": { "prefixKey": "b", "bindings": { "palette.open": "cmd+shift+k", "diff.toggleLayout": null, "diff.nextHunk": "prefix+j" } } }
         """)
         defer { try? FileManager.default.removeItem(at: directory) }
 
         #expect(Array(WorkspaceStatusBarView.hints(for: .graph, settings: settings).prefix(2)) == [
-            hint(["⇧⌘K"], "Commands"),
-            hint(["⌃B"], "Prefix"),
+            hint(["⇧⌘K"], label: "Commands"),
+            hint(["⌃B"], label: "Prefix"),
         ])
-        #expect(!WorkspaceStatusBarView.hints(for: .diff, settings: settings).map(\.label).contains("split"))
+        let diffHints = WorkspaceStatusBarView.hints(for: .diff, settings: settings)
+        #expect(diffHints.first == hint(["⌃B", "J"], ["K"], label: "change"))
+        #expect(!diffHints.map(\.label).contains("split"))
     }
 
     @Test func theToolbarTogglesMirrorPanelVisibility() {
@@ -89,6 +92,11 @@ struct WorkspaceChromeTests {
         #expect(toolbar.sidebarToggle.isToggledOn == false)
         #expect(toolbar.commitPanelToggle.isToggledOn == true)
         #expect(toolbar.commandButtons.allSatisfy { $0.isToggledOn == nil })
+
+        for toggle in [toolbar.sidebarToggle, toolbar.commitPanelToggle] {
+            #expect(toggle.accessibilityRole() == .checkBox)
+            #expect(toggle.accessibilityValue() as? Bool == toggle.isToggledOn)
+        }
     }
 
     @Test func hidingAPanelTurnsItsToolbarToggleOff() async throws {

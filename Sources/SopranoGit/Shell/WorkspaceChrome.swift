@@ -37,7 +37,7 @@ final class CommandButton: NSButton {
     var isToggledOn: Bool? {
         didSet {
             guard isToggledOn != oldValue else { return }
-            setAccessibilityValue(isToggledOn.map { $0 ? 1 : 0 })
+            setAccessibilityValue(isToggledOn)
             needsDisplay = true
         }
     }
@@ -94,7 +94,10 @@ final class CommandButton: NSButton {
         target = self
         action = #selector(clicked)
         setAccessibilityLabel(accessibilityLabel ?? title)
-        if isToggle { setAccessibilityValue(0) }
+        if isToggle {
+            setAccessibilityRole(.checkBox)
+            setAccessibilityValue(false)
+        }
         refresh()
     }
 
@@ -501,19 +504,18 @@ final class WorkspaceToolbarView: NSView {
     }
 }
 
-/// 36 pt banner over the center while git has paused an operation: raised,
-/// washed in the status colour, the status mark and label (NEEDS INPUT, or
-/// ERROR while conflicts remain), "Merge in progress · 2 conflicts", then
-/// Continue (ink), Abort and Skip with their keycaps.
+/// 36 pt banner over the center while git has paused an operation
+/// (components.css `.banner`): raised, the status mark, then
+/// "Merge in progress · 2 conflicts" in the status colour (yellow while
+/// paused, danger while conflicts remain), then Continue (ink), Abort and
+/// Skip with their keycaps.
 @MainActor
 final class OperationBannerView: NSView {
     static let height: CGFloat = 36
 
     var onPerform: ((String) -> Void)?
 
-    private let wash = NSView()
     private let mark = ChromeStatusMark()
-    private let statusLabel = NSTextField(labelWithString: "")
     private let label = NSTextField(labelWithString: "")
     private let continueButton: CommandButton
     private let abortButton: CommandButton
@@ -528,8 +530,6 @@ final class OperationBannerView: NSView {
         skipButton = CommandButton(title: "Skip", commandID: "operation.skip", theme: theme, kind: .standard)
         super.init(frame: .zero)
         wantsLayer = true
-        wash.wantsLayer = true
-        statusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         for button in [continueButton, abortButton, skipButton] {
@@ -538,20 +538,14 @@ final class OperationBannerView: NSView {
         let buttons = NSStackView(views: [continueButton, abortButton, skipButton])
         buttons.spacing = 6
         buttons.alignment = .centerY
-        for view in [wash, mark, statusLabel, label, buttons, bottomRule] as [NSView] {
+        for view in [mark, label, buttons, bottomRule] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
         NSLayoutConstraint.activate([
-            wash.leadingAnchor.constraint(equalTo: leadingAnchor),
-            wash.trailingAnchor.constraint(equalTo: trailingAnchor),
-            wash.topAnchor.constraint(equalTo: topAnchor),
-            wash.bottomAnchor.constraint(equalTo: bottomAnchor),
             mark.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Chrome.Space.bar),
             mark.centerYAnchor.constraint(equalTo: centerYAnchor),
-            statusLabel.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 10),
-            statusLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: statusLabel.trailingAnchor, constant: 10),
+            label.leadingAnchor.constraint(equalTo: mark.trailingAnchor, constant: 10),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -10),
             buttons.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Chrome.Space.bar),
@@ -589,7 +583,8 @@ final class OperationBannerView: NSView {
         return parts.joined(separator: " · ")
     }
 
-    /// ERROR while conflicts remain, NEEDS INPUT once git can continue.
+    /// Danger (error) while conflicts remain, yellow (needs input) once git
+    /// can continue.
     static func status(conflicts: Int) -> ChromeStatus {
         conflicts > 0 ? .error : .needsInput
     }
@@ -598,9 +593,7 @@ final class OperationBannerView: NSView {
         let colors = theme.colors
         let status = Self.status(conflicts: conflicts)
         mark.set(status: status, colors: colors)
-        wash.layer?.backgroundColor = status.headerWash(in: colors)?.cgColor
-        statusLabel.setStatusText(status.label, color: status.color(in: colors))
-        label.setChromeText(Self.text(for: operation, conflicts: conflicts), font: ChromeFont.labelStrong, color: colors.textPrimary)
+        label.setChromeText(Self.text(for: operation, conflicts: conflicts), font: ChromeFont.labelStrong, color: status.color(in: colors))
         skipButton.isHidden = !operation.canSkip
         [continueButton, abortButton, skipButton].forEach { $0.refresh(context: context) }
     }
@@ -697,10 +690,11 @@ final class WorkspaceStatusBarView: NSView {
     /// region the global ones (`⌘P Commands`, `⌃A Prefix`, `? Shortcuts`).
     /// Caps come from the key bindings; unbound commands drop out.
     static func hints(for region: FocusRegion?, settings: SettingsCenter = .shared) -> [HintsView.Hint] {
-        func caps(_ ids: String...) -> [String] {
-            ids.flatMap { hintCaps(for: $0, settings: settings) ?? [] }
+        /// One cap group per alternative chord: `[["J"], ["K"]]`.
+        func caps(_ ids: String...) -> [[String]] {
+            ids.compactMap { hintCaps(for: $0, settings: settings) }
         }
-        let entries: [(caps: [String], label: String)]
+        let entries: [(caps: [[String]], label: String)]
         if region == .diff {
             entries = [
                 (caps("diff.nextHunk", "diff.previousHunk"), "change"),
@@ -712,7 +706,7 @@ final class WorkspaceStatusBarView: NSView {
             let keymap = settings.keymap
             entries = [
                 (caps("palette.open"), "Commands"),
-                (keymap.prefixChord.keycaps(prefixKey: keymap.prefixKey), "Prefix"),
+                ([keymap.prefixChord.keycaps(prefixKey: keymap.prefixKey)].filter { !$0.isEmpty }, "Prefix"),
                 (caps("help.shortcuts"), "Shortcuts"),
             ]
         }
@@ -830,6 +824,7 @@ final class ErrorToastView: NSView {
         keycaps = ChromeKeycapGroupView(caps: [], theme: theme)
         super.init(frame: .zero)
         wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         messageLabel.maximumNumberOfLines = 8
         messageLabel.lineBreakMode = .byWordWrapping
         messageLabel.cell?.truncatesLastVisibleLine = true
@@ -862,16 +857,30 @@ final class ErrorToastView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
+    override var wantsUpdateLayer: Bool { true }
+
+    /// Re-resolves the e2 shadow and layer colours, so they follow the
+    /// effective appearance.
+    override func updateLayer() {
+        guard let layer else { return }
+        let colors = theme.colors
+        colors.shadowE2.apply(to: layer)
+        layer.backgroundColor = colors.bgRaised.cgColor
+        layer.cornerRadius = Chrome.Radius.popover
+        layer.borderColor = colors.borderSubtle.cgColor
+        layer.borderWidth = Chrome.hairline
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+
     func apply(theme: AppTheme) {
         self.theme = theme
         let colors = theme.colors
-        if let layer {
-            colors.shadowE2.apply(to: layer)
-            layer.backgroundColor = colors.bgRaised.cgColor
-            layer.cornerRadius = Chrome.Radius.popover
-            layer.borderColor = colors.borderSubtle.cgColor
-            layer.borderWidth = Chrome.hairline
-        }
+        needsDisplay = true
+        updateLayer()
         mark.color = colors.danger
         messageLabel.font = ChromeFont.monoSmall
         messageLabel.textColor = colors.textMuted

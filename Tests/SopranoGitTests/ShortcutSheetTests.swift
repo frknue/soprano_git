@@ -18,4 +18,12 @@ struct ShortcutSheetTests {
         #expect(sheet.appearance?.name == ThemeCenter.shared.theme.appearance.nsAppearance.name)
         #expect(!sheet.hasShadow)
     }
+
+    @Test func applyingAThemeReThemesTheOpenSheet() {
+        let sheet = ShortcutSheetPanel()
+        sheet.apply(theme: .folioInk)
+        #expect(sheet.appearance?.name == AppTheme.folioInk.appearance.nsAppearance.name)
+        sheet.apply(theme: .folioPaper)
+        #expect(sheet.appearance?.name == AppTheme.folioPaper.appearance.nsAppearance.name)
+    }
 }

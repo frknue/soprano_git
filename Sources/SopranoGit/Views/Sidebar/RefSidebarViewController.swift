@@ -340,8 +340,12 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
 
     // MARK: - NSOutlineViewDelegate
 
+    /// Section rows carry their top margin inside the row; their pill and tick align
+    /// to the bottom `rowHeight` points, where the eyebrow sits.
     func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
-        self.outlineView.makeListRowView(row: outlineView.row(forItem: item))
+        let rowView = self.outlineView.makeListRowView(row: outlineView.row(forItem: item))
+        if let node = item as? SidebarNode, case .section = node.kind { rowView.contentHeight = Self.rowHeight }
+        return rowView
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {

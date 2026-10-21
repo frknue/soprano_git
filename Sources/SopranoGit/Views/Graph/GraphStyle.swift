@@ -10,6 +10,8 @@ enum GraphMetrics {
     static let lineWidth: CGFloat = 2
     /// Text inset of every cell and header title.
     static let cellPadding: CGFloat = 12
+    /// Space kept after a text cell's text.
+    static let textTrailingPadding: CGFloat = 6
     /// Commit node diameter.
     static let nodeSize: CGFloat = 8
     /// Stroke-centre radius of the HEAD ring (stroke 1.5).
@@ -32,6 +34,21 @@ enum GraphMetrics {
 
     /// Automatic width range of the graph column (it follows the widest row); users may drag it wider.
     static let graphWidthRange: ClosedRange<CGFloat> = 64 ... 280
+
+    /// Default date column width: the widest text `dateStyle` produces (`DateText`) in
+    /// `font`, plus the cell's padding. Relative dates are widest as `MMM d yyyy`, so every
+    /// month on a two-digit day of an earlier year is measured; absolute ones have one shape.
+    static func dateColumnWidth(for dateStyle: AppSettings.DateStyle, font: NSFont) -> CGFloat {
+        let utc = TimeZone(identifier: "UTC")!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        let now = calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        let samples = (1 ... 12).compactMap { month in
+            calendar.date(from: DateComponents(year: 2023, month: month, day: 28, hour: 20, minute: 58))
+        }.map { DateText.format($0, style: dateStyle, now: now, timeZone: utc) }
+        let widest = samples.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return ceil(widest) + cellPadding + textTrailingPadding
+    }
 }
 
 /// Everything the graph draws with for one theme: the lane colors, text attributes,
@@ -73,9 +90,10 @@ final class GraphStyle {
     let workingCopyCGColor: CGColor
     /// Rail of search hits that are not the current one.
     let matchMutedColor: NSColor
-    /// Search text highlight behind the matched characters (unselected rows).
-    let matchTextBackground: NSColor
-    /// Matched characters on the selected row: `matchOnSelection`, Semibold.
+    /// Matched characters elsewhere (other rows, or the selected row of an unfocused
+    /// list): ink, Semibold, no wash.
+    let matchText: NSColor
+    /// Matched characters on the selected row of the focused list: `matchOnSelection`, Semibold.
     let matchOnSelection: NSColor
     let matchFont: NSFont
 
@@ -91,6 +109,9 @@ final class GraphStyle {
         let color: ObjectIdentifier
     }
 
+    /// Author and date font (SF Pro 11 tabular); sizes the date column.
+    nonisolated static var metaFont: NSFont { ChromeFont.count }
+
     init(theme: AppTheme) {
         self.theme = theme
         let colors = theme.colors
@@ -99,7 +120,7 @@ final class GraphStyle {
 
         let truncating = NSMutableParagraphStyle()
         truncating.lineBreakMode = .byTruncatingTail
-        let meta = ChromeFont.count
+        let meta = Self.metaFont
         let sha = ChromeFont.monoSmall
         messageAttributes = [.font: ChromeFont.label, .foregroundColor: colors.textPrimary, .paragraphStyle: truncating]
         mergeMessageAttributes = [.font: ChromeFont.label, .foregroundColor: colors.textMuted, .paragraphStyle: truncating]
@@ -119,7 +140,7 @@ final class GraphStyle {
         headRingCGColor = colors.textPrimary.cgColor
         workingCopyCGColor = colors.textMuted.cgColor
         matchMutedColor = colors.yellow.withAlphaComponent(0.5)
-        matchTextBackground = colors.yellow.withAlphaComponent(0.32)
+        matchText = colors.textPrimary
         matchOnSelection = colors.matchOnSelection
         matchFont = ChromeFont.sans(size: 12, weight: .semibold)
     }

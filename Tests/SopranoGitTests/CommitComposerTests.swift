@@ -214,4 +214,47 @@ struct CommitComposerTests {
         #expect(composer.counterText == "73/72")
         #expect(composer.isSummaryTooLong)
     }
+
+    @Test func theSummaryShowsItsFocusEdgeAsSoonAsItTakesFocus() {
+        let composer = CommitComposerView(theme: .folioPaper)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 240), styleMask: [], backing: .buffered, defer: true)
+        window.contentView = composer
+        #expect(!composer.summaryBox.isFocused)
+        #expect(window.makeFirstResponder(composer.summaryField))
+        #expect(composer.summaryBox.isFocused)
+        #expect(window.makeFirstResponder(nil))
+        #expect(!composer.summaryBox.isFocused)
+    }
+
+    @Test func pressingTheAmendCheckboxReportsTheToggleOnlyWhenEnabled() {
+        let composer = CommitComposerView(theme: .folioPaper)
+        var toggles: [Bool] = []
+        composer.onAmendToggled = { toggles.append($0) }
+
+        #expect(composer.amendCheckbox.accessibilityPerformPress())
+        #expect(toggles == [true])
+
+        composer.isAmendEnabled = false
+        #expect(!composer.amendCheckbox.accessibilityPerformPress())
+        #expect(toggles == [true])
+        #expect(composer.isAmending)
+    }
+
+    @Test func clickingTheAmendLabelReportsTheToggleOnlyWhenEnabled() throws {
+        let composer = CommitComposerView(theme: .folioPaper)
+        var toggles: [Bool] = []
+        composer.onAmendToggled = { toggles.append($0) }
+        let click = try #require(composer.amendLabel.gestureRecognizers.first as? NSClickGestureRecognizer)
+        let target = try #require(click.target as? NSObject)
+        let action = try #require(click.action)
+
+        _ = target.perform(action, with: click)
+        #expect(toggles == [true])
+        #expect(composer.isAmending)
+
+        composer.isAmendEnabled = false
+        _ = target.perform(action, with: click)
+        #expect(toggles == [true])
+        #expect(composer.isAmending)
+    }
 }

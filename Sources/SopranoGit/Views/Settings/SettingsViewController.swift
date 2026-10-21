@@ -909,12 +909,17 @@ final class SettingsRootView: NSView {
 }
 
 /// One command on the Keyboard page: SF Pro 12 title over its SF Mono 11
-/// `id · scope`, one K1 keycap group per chord (accent when customized) or
-/// the recording prompt, and Record / Off / Reset.
+/// `id · scope`, one K1 keycap group per chord (plus an outline `Custom`
+/// chip when customized) or the muted recording prompt, and Record / Off /
+/// Reset.
 @MainActor
 final class ShortcutSettingRow: NSView {
     /// One group per chord, in order (tests).
     private(set) var keycapGroups: [ChromeKeycapGroupView] = []
+    /// The `Custom` chip shown when the binding is customized (tests).
+    private(set) var customChip: ChromeChip?
+    /// The recording prompt, while recording (tests).
+    private(set) var recordingPrompt: NSTextField?
 
     init(
         entry: ShortcutEntry,
@@ -951,18 +956,24 @@ final class ShortcutSettingRow: NSView {
         keys.spacing = 6
         if let recording {
             let prompt = NSTextField(labelWithString: "")
-            prompt.setChromeText(recording, font: ChromeFont.sans(size: 11, weight: .semibold), color: colors.accent)
+            prompt.setChromeText(recording, font: ChromeFont.label, color: colors.textMuted)
             keys.addArrangedSubview(prompt)
+            recordingPrompt = prompt
         } else if entry.keys.isEmpty {
             let none = NSTextField(labelWithString: "")
             none.setChromeText(isDisabled ? "off" : "unbound", font: ChromeFont.meta, color: colors.textMuted)
             keys.addArrangedSubview(none)
         } else {
             for caps in entry.keys {
-                let group = ChromeKeycapGroupView(caps: caps, theme: theme, tone: isCustomized ? .accent : .primary)
+                let group = ChromeKeycapGroupView(caps: caps, theme: theme, tone: .primary)
                 keycapGroups.append(group)
                 keys.addArrangedSubview(group)
             }
+        }
+        if isCustomized, recording == nil {
+            let chip = ChromeChip(text: "Custom", theme: theme, style: .outline)
+            keys.addArrangedSubview(chip)
+            customChip = chip
         }
         if let conflict {
             let mark = ChromeStatusMark(shape: .dot, color: colors.yellow, size: Chrome.statusMarkSmall)

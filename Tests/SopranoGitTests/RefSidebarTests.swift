@@ -233,6 +233,51 @@ struct RefSidebarTests {
         #expect(SidebarCellView.indent(level: 2) == 30)
     }
 
+    @Test func theChevronExpandsAndCollapsesFoldersAndSections() async throws {
+        let h = try await makeHarness()
+        defer { cleanUp(h) }
+        let outline = h.sidebar.outlineView
+        func pressChevron(_ id: String) throws {
+            let row = try #require(h.sidebar.row(forID: id))
+            let item = try #require(outline.item(atRow: row))
+            let cell = try #require(outline.delegate?.outlineView?(outline, viewFor: outline.outlineTableColumn, item: item) as? SidebarCellView)
+            cell.disclosureButton.performClick(nil)
+        }
+
+        try pressChevron("folder:local:feature")
+        #expect(h.sidebar.visibleRowIDs.contains("ref:refs/heads/feature/login"), "folder expands")
+        try pressChevron("folder:local:feature")
+        #expect(!h.sidebar.visibleRowIDs.contains("ref:refs/heads/feature/login"), "folder collapses")
+
+        try pressChevron("section:tags")
+        #expect(!h.sidebar.visibleRowIDs.contains("ref:refs/tags/v1.0"), "section collapses")
+        try pressChevron("section:tags")
+        #expect(h.sidebar.visibleRowIDs.contains("ref:refs/tags/v1.0"), "section expands")
+    }
+
+    @Test func sectionRowPillsAlignToTheEyebrowBelowTheTopMargin() async throws {
+        let h = try await makeHarness()
+        defer { cleanUp(h) }
+        let outline = h.sidebar.outlineView
+        func rowView(_ id: String) throws -> ListRowView {
+            let row = try #require(h.sidebar.row(forID: id))
+            let item = try #require(outline.item(atRow: row))
+            let view = try #require(outline.delegate?.outlineView?(outline, rowViewForItem: item) as? ListRowView)
+            view.frame = outline.rect(ofRow: row)
+            return view
+        }
+        let tags = try rowView("section:tags")
+        let main = try rowView("ref:refs/heads/main")
+
+        #expect(tags.contentHeight == RefSidebarViewController.rowHeight)
+        #expect(main.contentHeight == nil)
+        let inset = ListRowView.pillVerticalInset
+        #expect(tags.pillRect.height == RefSidebarViewController.rowHeight - 2 * inset)
+        let bottomEdge = tags.isFlipped ? tags.bounds.maxY - tags.pillRect.maxY : tags.pillRect.minY - tags.bounds.minY
+        #expect(bottomEdge == inset, "pill sits on the bottom 24 pt, below the 8 pt margin")
+        #expect(main.pillRect.height == main.bounds.height - 2 * inset)
+    }
+
     @Test func sidebarCommandsMatchTheBindingTable() {
         let commands = SidebarCommands.all
         #expect(commands.map(\.id) == ["sidebar.filter", "sidebar.focusFilter", "sidebar.next", "sidebar.previous", "sidebar.activate", "sidebar.toggle"])

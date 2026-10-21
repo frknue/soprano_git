@@ -101,7 +101,7 @@ struct SettingsScreenTests {
         #expect(popup.selectedItem?.representedObject as? String == center.settings.theme)
     }
 
-    @Test func keyboardRowsShowOneCapGroupPerChordAccentWhenCustomized() throws {
+    @Test func keyboardRowsShowOneNeutralCapGroupPerChordAndACustomChipWhenCustomized() throws {
         let (center, directory) = try makeCenter()
         defer { try? FileManager.default.removeItem(at: directory) }
         center.write("prefix+g", at: ["keybindings", "bindings", "repo.fetch"])
@@ -109,9 +109,36 @@ struct SettingsScreenTests {
 
         let fetch = try #require(screen.shortcutRows["repo.fetch"])
         #expect(fetch.keycapGroups.map(\.caps) == [["⌃A", "G"]])
-        #expect(fetch.keycapGroups.allSatisfy { $0.tone == .accent })
+        #expect(fetch.keycapGroups.allSatisfy { $0.tone == .primary })
+        let chip = try #require(fetch.customChip)
+        #expect(chip.text == "Custom")
+        #expect(chip.style == .outline)
 
         let other = try #require(screen.shortcutRows.first { $0.key != "repo.fetch" && !$0.value.keycapGroups.isEmpty }?.value)
         #expect(other.keycapGroups.allSatisfy { $0.tone == .primary })
+        #expect(other.customChip == nil)
+    }
+
+    @Test func theRecordingPromptIsMutedLabelText() throws {
+        let (center, directory) = try makeCenter()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let (screen, _) = makeScreen(center)
+
+        screen.startRecording("repo.fetch")
+        defer { screen.stopRecording(rerender: false) }
+        let prompt = try #require(screen.shortcutRows["repo.fetch"]?.recordingPrompt)
+        let attributes = prompt.attributedStringValue.attributes(at: 0, effectiveRange: nil)
+        #expect(attributes[.foregroundColor] as? NSColor == ThemeCenter.shared.theme.colors.textMuted)
+        #expect((attributes[.font] as? NSFont)?.pointSize == ChromeFont.label.pointSize)
+    }
+
+    @Test func aSettingsTextFieldShowsTheFocusEdgeWhileFocused() throws {
+        let theme = AppTheme.folioPaper
+        let field = try #require(SettingsForm(theme: theme).textField("value", width: 120) as? FocusReportingTextField)
+        #expect(field.layer?.borderColor == theme.colors.borderStrong.cgColor)
+        field.onFocusChange?(true)
+        #expect(field.layer?.borderColor == theme.colors.fieldFocusEdge.cgColor)
+        field.onFocusChange?(false)
+        #expect(field.layer?.borderColor == theme.colors.borderStrong.cgColor)
     }
 }

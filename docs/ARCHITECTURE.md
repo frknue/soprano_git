@@ -91,7 +91,8 @@ menus, toolbar buttons, and the shortcut sheet. Commands act on `context.target`
 - `theme`: `"soprano"` (default) follows `~/.config/soprano/settings.json`'s `theme` and
   appearance, live; `"folio"` follows macOS (Paper in light, Ink in dark); `"folio-paper"`
   / `"folio-ink"` pin one; the other `AppTheme.options` ids are third-party themes. An
-  unknown id falls back to `folio` with a warning.
+  unknown id (e.g. the removed `mission-control`) keeps the default `"soprano"` with a
+  warning; Soprano's own unknown theme id resolves to `folio`.
 - `keybindings`: `prefixKey` (default `a` → ⌃A), `prefixTimeoutMs` (1500, 300–5000),
   `bindings: { "<command id>": "chord" | ["chord", …] | null }`.
 - `ThemeCenter.shared.theme` + `addObserver`; `SettingsCenter.shared.settings`,
@@ -235,6 +236,11 @@ the caret, matched characters on the selected row, and the prefix mode chip.
 - Status bar (`WorkspaceStatusBarView`): `HintsView` shows the focused region's keys from
   `hints(for:settings:)`, each with the caps of the command's shortest chord (`?` over
   `⌘/`); unbound commands drop out.
+- Operation banner: a status mark plus status-coloured text (no uppercase word, no wash).
+- Graph date column: its default width fits the widest date of the current date style.
+- Settings › Keyboard: a customized shortcut shows its primary caps plus an outline
+  `Custom` chip.
+- Welcome screen: recent-repository rows show plain muted numbers.
 - Rows: `ChromeSelectionPill` — `selection` plus the accent pencil tick when the region has
   focus, `selectionMuted` when not, `hover` on hover; inset 2 pt vertically.
 - Shared kit in `Views/Common`: `ListTableView` / `ListOutlineView` (hover tracking, vend
@@ -259,7 +265,8 @@ the caret, matched characters on the selected row, and the prefix mode chip.
   shifts only the code text of line rows (clipped past the marker), so gutters, markers
   and hunk headers stay put and both split sides move together. `DiffTableView` routes
   sideways wheel/trackpad deltas there (a gesture keeps the axis it started on);
-  `DiffTextScroller` is a slotless `textMuted` α0.45 bar along the list's bottom, hidden
+  `DiffTextScroller` is a slotless bar along the list's bottom whose knob is a
+  `scrollbarThumb` capsule, hidden
   when no line overflows. The range comes from `DiffDocument.oldColumns` / `newColumns`
   (widest line per side in monospaced columns) at the clip view's width.
 - Graph: 28 pt rows; lanes 14 pt apart, 2 pt lines, colors from `theme.graphLanes`; commit

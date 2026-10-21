@@ -32,14 +32,16 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             }
         }
 
-        /// Starting width; the graph follows its lanes and the message takes the rest.
-        var defaultWidth: CGFloat {
+        /// Starting width; the graph follows its lanes and the message takes the rest. The
+        /// date column fits the widest date `dateStyle` produces.
+        func defaultWidth(dateStyle: AppSettings.DateStyle) -> CGFloat {
             switch self {
             case .refs: 184
             case .graph: 76
             case .message: 300
             case .author: 96
-            case .date: 52
+            case .date:
+                min(max(GraphMetrics.dateColumnWidth(for: dateStyle, font: GraphStyle.metaFont), widthRange.lowerBound), widthRange.upperBound)
             case .id: 78
             }
         }
@@ -78,6 +80,8 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     var defaults: UserDefaults = .standard
     /// Requests the next page of commits (tests count the calls).
     var pageLoader: @MainActor () -> Void
+    /// The date style dates and the date column follow (tests inject one).
+    var dateStyle: @MainActor () -> AppSettings.DateStyle = { SettingsCenter.shared.settings.dateStyle }
 
     private(set) var model = GraphRowModel(stashes: [], workingCopy: .none)
     private var pillsByCommit: [String: [RefPill]] = [:]
@@ -86,15 +90,17 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     private var theme: AppTheme
     private(set) var style: GraphStyle
 
-    let tableView = ListTableView()
+    let tableView = GraphTableView()
     private let headerView = GraphHeaderView()
     private var scrollView: NSScrollView!
     private var columns: [Column: NSTableColumn] = [:]
     private var customWidths: [String: Double] = [:]
     private var isApplyingWidths = false
     private let rowMenu = NSMenu()
-    /// The row last drawn with selected-row text (ink meta, accent matches).
+    /// The row last drawn with selected-row text (ink meta, accent matches) and whether
+    /// the table had focus then.
     private var styledSelectedRow = -1
+    private var styledFocus = false
 
     let searchBar: GraphSearchBar
     private var searchBarHeight: NSLayoutConstraint!
@@ -144,7 +150,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             tableColumn.title = column.title
             tableColumn.minWidth = column.widthRange.lowerBound
             tableColumn.maxWidth = column.widthRange.upperBound
-            tableColumn.width = column.defaultWidth
+            tableColumn.width = column.defaultWidth(dateStyle: dateStyle())
             tableColumn.resizingMask = column == .message ? [] : .userResizingMask
             tableView.addTableColumn(tableColumn)
             columns[column] = tableColumn
@@ -156,6 +162,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         }
 
         tableView.dataSource = self
+        tableView.onFocusChange = { [weak self] in self?.restyleSelectedRows() }
         tableView.delegate = self
         tableView.allowsMultipleSelection = false
         tableView.allowsEmptySelection = true
@@ -262,7 +269,8 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
 
     // MARK: - Theme and settings
 
-    private func apply(theme: AppTheme) {
+    /// Restyles the table and every row view it holds (ThemeCenter observer; tests).
+    func apply(theme: AppTheme) {
         self.theme = theme
         style = GraphStyle(theme: theme)
         guard isViewLoaded else { return }
@@ -271,12 +279,22 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         ListStyle.applyScrollView(scrollView, theme: theme, surface: .base)
         searchBar.apply(theme: theme)
         headerView.needsDisplay = true
-        reloadVisibleRows()
+        reloadAvailableRows()
     }
 
-    private func settingsChanged() {
+    /// Dates re-render; a date column at its default width re-fits the date style.
+    func settingsChanged() {
         dateCache = Array(repeating: nil, count: model.count)
-        reloadVisibleRows()
+        if isViewLoaded, customWidths[Column.date.rawValue] == nil, let date = columns[.date] {
+            let width = Column.date.defaultWidth(dateStyle: dateStyle())
+            if date.width != width {
+                isApplyingWidths = true
+                date.width = width
+                isApplyingWidths = false
+                layoutColumns()
+            }
+        }
+        reloadAvailableRows()
     }
 
     // MARK: - Controller events
@@ -370,7 +388,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
                 }
             }
         } else {
-            if needsVisibleRefresh { reloadVisibleRows() }
+            if needsVisibleRefresh { reloadAvailableRows() }
             applySelection()
         }
     }
@@ -427,18 +445,22 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         }
         if needsVisibleRefresh {
             needsVisibleRefresh = false
-            reloadVisibleRows()
+            reloadAvailableRows()
         }
         applySelection()
         checkPaging()
     }
 
-    private func reloadVisibleRows() {
+    /// Reconfigures every row view the table holds, visible or prepared off-screen, so
+    /// none is reused with stale text, style or matches.
+    private func reloadAvailableRows() {
         needsVisibleRefresh = false
         guard isViewLoaded, model.count > 0 else { return }
-        let visible = tableView.rows(in: tableView.visibleRect)
-        guard visible.length > 0 else { return }
-        let rows = IndexSet(integersIn: visible.location ..< min(model.count, visible.location + visible.length))
+        var rows = IndexSet()
+        tableView.enumerateAvailableRowViews { _, row in
+            if row >= 0, row < self.model.count { rows.insert(row) }
+        }
+        guard !rows.isEmpty else { return }
         tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integersIn: 0 ..< tableView.numberOfColumns))
     }
 
@@ -482,7 +504,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             if graph.width != width { graph.width = width }
         }
         if let refs = columns[.refs] {
-            let stored = customWidths[Column.refs.rawValue].map { CGFloat($0) } ?? Column.refs.defaultWidth
+            let stored = customWidths[Column.refs.rawValue].map { CGFloat($0) } ?? Column.refs.defaultWidth(dateStyle: .relative)
             // Narrow center areas squeeze the refs column so messages stay readable.
             let width = available < 720 ? min(stored, max(100, floor(available * 0.3))) : stored
             if refs.width != width { refs.width = width }
@@ -549,7 +571,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             )
             return view
         case .message:
-            let isSelected = tableView.isRowSelected(row)
+            let isFocusedSelection = tableView.isRowSelected(row) && self.tableView.hasFocus
             let view = reusable(GraphTextView.messageIdentifier) { GraphTextView() }
             switch entry.node.content {
             case .workingCopy:
@@ -559,7 +581,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
                     text: commit.summary,
                     attributes: commit.isMerge ? style.mergeMessageAttributes : style.messageAttributes,
                     highlight: highlightRange(in: commit.summary, row: row),
-                    isSelected: isSelected,
+                    isFocusedSelection: isFocusedSelection,
                     style: style
                 )
             case let .stash(stash):
@@ -567,7 +589,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
                     text: stash.message,
                     attributes: style.mergeMessageAttributes,
                     highlight: highlightRange(in: stash.message, row: row),
-                    isSelected: isSelected,
+                    isFocusedSelection: isFocusedSelection,
                     style: style
                 )
             }
@@ -634,7 +656,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         case let .commit(commit): commit.author.date
         case let .stash(stash): stash.date
         }
-        let text = date.map { DateText.format($0, style: SettingsCenter.shared.settings.dateStyle) } ?? ""
+        let text = date.map { DateText.format($0, style: dateStyle()) } ?? ""
         if dateCache.indices.contains(row) { dateCache[row] = text }
         return text
     }
@@ -659,13 +681,16 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         controller.select(selection)
     }
 
-    /// Redraws the rows entering and leaving the selection: the selected row's
-    /// author, date and SHA are ink and its search match is drawn in `matchOnSelection`.
+    /// Redraws the rows entering and leaving the selection, and the selected row when the
+    /// table gains or loses focus: the selected row's author, date and SHA are ink and its
+    /// search match is drawn in `matchOnSelection` while the table has focus.
     private func restyleSelectedRows() {
         let selected = tableView.selectedRow
-        guard selected != styledSelectedRow else { return }
+        let focus = tableView.hasFocus
+        guard selected != styledSelectedRow || focus != styledFocus else { return }
         let rows = IndexSet([styledSelectedRow, selected].filter { $0 >= 0 && $0 < model.count })
         styledSelectedRow = selected
+        styledFocus = focus
         guard !rows.isEmpty else { return }
         tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integersIn: 0 ..< tableView.numberOfColumns))
     }
@@ -879,7 +904,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         searchQuery = nil
         searchMatches = []
         searchCurrent = nil
-        reloadVisibleRows()
+        reloadAvailableRows()
         takeFocus()
     }
 
@@ -940,7 +965,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         searchCurrent = index
         select(row: searchMatches[index])
         updateSearchCount()
-        reloadVisibleRows()
+        reloadAvailableRows()
     }
 
     /// Matches over every loaded row. `keepingPosition` (rows were rebuilt): the current
@@ -952,7 +977,7 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             searchMatches = []
             searchCurrent = nil
             updateSearchCount()
-            reloadVisibleRows()
+            reloadAvailableRows()
             return
         }
         let entries = model.entries
@@ -964,13 +989,13 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
             if keepingPosition {
                 self.searchCurrent = current.flatMap { rows[$0] == self.selectedRow ? $0 : nil }
                 self.updateSearchCount()
-                self.reloadVisibleRows()
+                self.reloadAvailableRows()
             } else if let current {
                 self.moveToMatch(current)
             } else {
                 self.searchCurrent = nil
                 self.updateSearchCount()
-                self.reloadVisibleRows()
+                self.reloadAvailableRows()
             }
         }
         if entries.count <= Self.synchronousSearchLimit {
@@ -1028,5 +1053,36 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
         guard let query = searchQuery, matchState(row) != .none else { return nil }
         let range = (text as NSString).range(of: query, options: .caseInsensitive)
         return range.location == NSNotFound ? nil : range
+    }
+}
+
+/// The graph's table; reports when it gains or loses first responder so the selected
+/// row's search match can switch between accent (focused list) and ink.
+final class GraphTableView: ListTableView {
+    /// Whether the table is first responder.
+    private(set) var hasFocus = false
+    var onFocusChange: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        if became { setFocus(true) }
+        return became
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        if resigned { setFocus(false) }
+        return resigned
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { setFocus(false) }
+    }
+
+    private func setFocus(_ focus: Bool) {
+        guard hasFocus != focus else { return }
+        hasFocus = focus
+        onFocusChange?()
     }
 }

@@ -87,6 +87,18 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
         animationBehavior = .utilityWindow
         contentView = root
         build()
+        // A macOS light/dark flip (folio) re-themes an open sheet too.
+        ThemeCenter.shared.addObserver(self) { [weak self] theme in
+            guard let self, self.isVisible else { return }
+            self.apply(theme: theme)
+        }
+    }
+
+    /// Re-themes the panel and its rows.
+    func apply(theme: AppTheme) {
+        self.theme = theme
+        applyTheme()
+        reload()
     }
 
     @available(*, unavailable)
@@ -108,7 +120,7 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
     private func build() {
         search = SearchField(placeholder: "Filter commands, ids or keys", theme: theme)
         search.field.delegate = self
-        footerHints = HintsView(hints: [HintsView.Hint(caps: ["esc"], label: "Close")], theme: theme)
+        footerHints = HintsView(hints: [HintsView.Hint(caps: [["esc"]], label: "Close")], theme: theme)
         footerNote.lineBreakMode = .byTruncatingTail
         footerNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -175,10 +187,8 @@ final class ShortcutSheetPanel: NSPanel, NSTextFieldDelegate {
     }
 
     func show(relativeTo parent: NSWindow) {
-        theme = ThemeCenter.shared.theme
-        applyTheme()
         search.field.stringValue = ""
-        reload()
+        apply(theme: ThemeCenter.shared.theme)
         let parentFrame = parent.frame
         setFrameOrigin(NSPoint(
             x: parentFrame.midX - frame.width / 2,

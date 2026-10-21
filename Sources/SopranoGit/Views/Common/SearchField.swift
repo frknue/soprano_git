@@ -90,8 +90,8 @@ final class SearchField: NSView {
 }
 
 /// A text field that reports when editing starts and ends, so its surface can
-/// show the focus edge.
-private final class FocusReportingTextField: NSTextField {
+/// show the focus edge (search fields, the commit summary, settings fields).
+final class FocusReportingTextField: NSTextField {
     var onFocusChange: ((Bool) -> Void)?
 
     override func becomeFirstResponder() -> Bool {
@@ -102,6 +102,8 @@ private final class FocusReportingTextField: NSTextField {
 
     override func textDidEndEditing(_ notification: Notification) {
         super.textDidEndEditing(notification)
-        onFocusChange?(false)
+        // Return can end editing and re-focus the field inside `super`; the
+        // field still has focus whenever an editor remains attached.
+        onFocusChange?(currentEditor() != nil)
     }
 }

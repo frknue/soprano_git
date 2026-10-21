@@ -332,7 +332,6 @@ final class GraphTextView: NSView {
     static let authorIdentifier = NSUserInterfaceItemIdentifier("graph.cell.author")
     static let dateIdentifier = NSUserInterfaceItemIdentifier("graph.cell.date")
     static let idIdentifier = NSUserInterfaceItemIdentifier("graph.cell.id")
-    private static let trailingPadding: CGFloat = 6
 
     struct WorkingCopyCounts: Equatable {
         var conflicted: Int
@@ -341,26 +340,26 @@ final class GraphTextView: NSView {
     }
 
     private enum Content {
-        case text(String, [NSAttributedString.Key: Any], highlight: NSRange?, isSelected: Bool)
+        case text(String, [NSAttributedString.Key: Any], highlight: NSRange?, isFocusedSelection: Bool)
         case workingCopy(WorkingCopyCounts)
     }
 
-    private var content: Content = .text("", [:], highlight: nil, isSelected: false)
+    private var content: Content = .text("", [:], highlight: nil, isFocusedSelection: false)
     private var style: GraphStyle?
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
 
-    /// `highlight`: the search match, drawn on a yellow wash, or in `matchOnSelection`
-    /// Semibold when `isSelected`.
+    /// `highlight`: the search match, Semibold; in `matchOnSelection` when
+    /// `isFocusedSelection` (the selected row of the focused list), else ink.
     func configure(
         text: String,
         attributes: [NSAttributedString.Key: Any],
         highlight: NSRange? = nil,
-        isSelected: Bool = false,
+        isFocusedSelection: Bool = false,
         style: GraphStyle
     ) {
-        content = .text(text, attributes, highlight: highlight, isSelected: isSelected)
+        content = .text(text, attributes, highlight: highlight, isFocusedSelection: isFocusedSelection)
         self.style = style
         toolTip = nil
         needsDisplay = true
@@ -381,27 +380,32 @@ final class GraphTextView: NSView {
         }
     }
 
+    /// The text as drawn, with the search match styled (tests); nil for the working copy.
+    var attributedText: NSAttributedString? {
+        guard case let .text(text, attributes, highlight, isFocusedSelection) = content, let style else { return nil }
+        let string = NSMutableAttributedString(string: text, attributes: attributes)
+        if let highlight {
+            let color = isFocusedSelection ? style.matchOnSelection : style.matchText
+            string.addAttributes([.foregroundColor: color, .font: style.matchFont], range: highlight)
+        }
+        return string
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let style else { return }
         let inset = NSRect(
             x: bounds.minX + GraphMetrics.cellPadding,
             y: bounds.minY,
-            width: max(0, bounds.width - GraphMetrics.cellPadding - Self.trailingPadding),
+            width: max(0, bounds.width - GraphMetrics.cellPadding - GraphMetrics.textTrailingPadding),
             height: bounds.height
         )
         switch content {
-        case let .text(text, attributes, highlight, isSelected):
+        case let .text(text, attributes, highlight, _):
             guard !text.isEmpty else { return }
             let font = attributes[.font] as? NSFont ?? ChromeFont.label
             let lineHeight = ceil(font.ascender - font.descender)
             let rect = NSRect(x: inset.minX, y: floor(bounds.midY - lineHeight / 2), width: inset.width, height: lineHeight)
-            if let highlight {
-                let string = NSMutableAttributedString(string: text, attributes: attributes)
-                if isSelected {
-                    string.addAttributes([.foregroundColor: style.matchOnSelection, .font: style.matchFont], range: highlight)
-                } else {
-                    string.addAttribute(.backgroundColor, value: style.matchTextBackground, range: highlight)
-                }
+            if highlight != nil, let string = attributedText {
                 string.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
             } else {
                 (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes)

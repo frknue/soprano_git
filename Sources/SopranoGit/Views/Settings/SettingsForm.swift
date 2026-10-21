@@ -150,12 +150,13 @@ struct SettingsForm {
         return stack
     }
 
-    /// A 24 pt field: raised fill, 6 pt radius, `borderStrong` edge. Paths are
+    /// A 24 pt field: raised fill, 6 pt radius, `borderStrong` edge that
+    /// darkens to `fieldFocusEdge` while focused, accent caret. Paths are
     /// SF Mono 12 (`monospaced`), everything else SF Pro 12.
     func textField(_ value: String, placeholder: String? = nil, width: CGFloat, monospaced: Bool = false) -> NSTextField {
         let colors = theme.colors
         let font = monospaced ? ChromeFont.mono : ChromeFont.sans(size: 12, tabular: true)
-        let field = NSTextField(string: value)
+        let field = FocusReportingTextField(string: value)
         field.cell = SettingsFieldCell(textCell: value)
         field.isEditable = true
         field.isSelectable = true
@@ -180,6 +181,11 @@ struct SettingsForm {
         field.layer?.backgroundColor = colors.raised.cgColor
         if let placeholder {
             field.placeholderAttributedString = ChromeText.attributed(placeholder, font: font, color: colors.textMuted)
+        }
+        field.onFocusChange = { [weak field] focused in
+            guard let field else { return }
+            field.layer?.borderColor = (focused ? colors.fieldFocusEdge : colors.borderStrong).cgColor
+            if focused { ChromeFieldView.styleEditor(of: field, colors: colors) }
         }
         field.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
