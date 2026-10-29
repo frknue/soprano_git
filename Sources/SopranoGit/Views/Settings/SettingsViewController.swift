@@ -110,6 +110,8 @@ final class SettingsViewController: NSViewController, FocusRegionController {
     // MARK: - Layout
 
     override func loadView() {
+        // The theme may have changed between init and the first load.
+        theme = ThemeCenter.shared.theme
         root.wantsLayer = true
         sidebar.wantsLayer = true
         for view in [sidebar, scrollView] as [NSView] {

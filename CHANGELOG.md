@@ -32,3 +32,4 @@ All notable changes to Soprano Git are documented here. The format follows
 ### Fixed
 
 - `Esc` closes an open diff also while the commit panel has focus, e.g. after clicking another file in its list or moving through the files with `j` / `k`.
+- The diff, and repository tabs opened in the background, follow a theme switch made before they were first shown; the diff no longer stays dark after switching to Folio Paper.

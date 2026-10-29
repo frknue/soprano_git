@@ -75,6 +75,8 @@ final class RepoWorkspaceViewController: NSViewController, RepoWorkspace, NSSpli
     // MARK: - View
 
     override func loadView() {
+        // A background tab loads when first shown; the theme may have changed since init.
+        theme = ThemeCenter.shared.theme
         let root = NSView()
         root.wantsLayer = true
 

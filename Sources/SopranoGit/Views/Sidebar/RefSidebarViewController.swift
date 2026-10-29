@@ -56,6 +56,8 @@ final class RefSidebarViewController: NSViewController, FocusRegionController, S
     }
 
     override func loadView() {
+        // The theme may have changed between init and the first load.
+        theme = ThemeCenter.shared.theme
         let root = NSView()
         root.wantsLayer = true
 

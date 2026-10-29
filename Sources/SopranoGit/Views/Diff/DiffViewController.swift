@@ -69,6 +69,8 @@ final class DiffViewController: NSViewController, FocusRegionController, NSTable
     }
 
     override func loadView() {
+        // The view loads when the first diff opens; the theme may have changed since init.
+        theme = ThemeCenter.shared.theme
         let root = NSView()
         root.wantsLayer = true
 

@@ -142,6 +142,8 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     // MARK: - View
 
     override func loadView() {
+        // The theme may have changed between init and the first load.
+        apply(theme: ThemeCenter.shared.theme)
         let root = NSView()
         root.wantsLayer = true
 
@@ -273,11 +275,11 @@ final class CommitGraphViewController: NSViewController, FocusRegionController, 
     func apply(theme: AppTheme) {
         self.theme = theme
         style = GraphStyle(theme: theme)
+        searchBar.apply(theme: theme)
         guard isViewLoaded else { return }
         view.layer?.backgroundColor = theme.colors.bgBase.cgColor
         styleTable()
         ListStyle.applyScrollView(scrollView, theme: theme, surface: .base)
-        searchBar.apply(theme: theme)
         headerView.needsDisplay = true
         reloadAvailableRows()
     }
