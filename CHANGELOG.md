@@ -28,6 +28,7 @@ All notable changes to Soprano Git are documented here. The format follows
 ### Changed
 
 - New Folio look: light Paper and dark Ink themes that follow macOS (`"theme": "folio"`) or, by default, Soprano's theme and appearance; pin one with `folio-paper` or `folio-ink`. The `mission-control` theme is gone and falls back to the default (follow Soprano). The toolbar has Refs (`⌘J`) and Commit panel (`⌘K`) toggles, and the diff highlights the changed words within a line.
+- The app icon follows macOS's icon style (Appearance → Icon & widget style): Paper in Default, Ink in Dark, and tinted or clear like the system apps instead of a light tile.
 
 ### Fixed
 

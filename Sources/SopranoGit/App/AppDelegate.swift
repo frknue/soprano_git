@@ -9,10 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingURLs: [URL] = []
     private var didFinishLaunching = false
 
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        Self.installApplicationIcon()
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsCenter.shared
         settings.start()
@@ -67,13 +63,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { windowController?.window?.makeKeyAndOrderFront(nil) }
         return true
-    }
-
-    static func installApplicationIcon() {
-        let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns")
-            ?? AppResources.bundle.url(forResource: "AppIcon", withExtension: "icns")
-        if let url, let image = NSImage(contentsOf: url) {
-            NSApp.applicationIconImage = image
-        }
     }
 }
