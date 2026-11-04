@@ -98,8 +98,10 @@ not built yet.
 - `Sources/SopranoGit/Vendored/` is copied from Soprano by `scripts/sync-soprano-chrome.sh`
   (committed Soprano state only; source commit in `Vendored/SOPRANO_COMMIT`). Never edit
   it here: change Soprano, commit there, re-run the script.
-- `AppResources` (App/) only serves the AppIcon fallback; the SPM resource bundle is
-  `SopranoGit_SopranoGit.bundle`.
+- The app icon is `Support/Assets.car` (Paper, Ink, tinted and clear variants, found
+  through `CFBundleIconName`) plus the `Support/AppIcon.icns` fallback, both committed and
+  written by `scripts/render-app-icon.sh` (needs Xcode 26+ for `actool`). Never set
+  `NSApp.applicationIconImage`: a runtime icon skips the system's tinted icon style.
 - GUI apps start with a minimal PATH; `GitRunner` prepends Homebrew/user tool dirs and
   `git.extraPath` so hooks find node/bun. Passwords go through the app binary in `askpass`
   mode (`SOPRANO_GIT_ASKPASS=1`).

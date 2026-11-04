@@ -35,12 +35,12 @@ build_dir="$repo_root/.build/$configuration"
 output_parent="$(dirname "$output_app")"
 
 binary_path="$build_dir/SopranoGit"
-resource_bundle="$build_dir/SopranoGit_SopranoGit.bundle"
 info_plist="$repo_root/Support/Info.plist"
-app_icon="$repo_root/Sources/SopranoGit/Resources/AppIcon.icns"
+app_icon="$repo_root/Support/AppIcon.icns"
+app_icon_assets="$repo_root/Support/Assets.car"
 app_license="$repo_root/LICENSE"
 
-for required_path in "$binary_path" "$resource_bundle" "$info_plist" "$app_icon" "$app_license"; do
+for required_path in "$binary_path" "$info_plist" "$app_icon" "$app_icon_assets" "$app_license"; do
     if [[ ! -e "$required_path" ]]; then
         echo "Missing packaging input: $required_path" >&2
         exit 1
@@ -61,8 +61,8 @@ mkdir -p "$staged_app/Contents/MacOS" "$staged_app/Contents/Resources"
 cp "$binary_path" "$staged_app/Contents/MacOS/SopranoGit"
 cp "$info_plist" "$staged_app/Contents/Info.plist"
 cp "$app_icon" "$staged_app/Contents/Resources/AppIcon.icns"
+cp "$app_icon_assets" "$staged_app/Contents/Resources/Assets.car"
 cp "$app_license" "$staged_app/Contents/Resources/LICENSE"
-cp -R "$resource_bundle" "$staged_app/Contents/Resources/SopranoGit_SopranoGit.bundle"
 
 # One Info.plist serves every flavour; the caller picks the identity of this build.
 staged_plist="$staged_app/Contents/Info.plist"

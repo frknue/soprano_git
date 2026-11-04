@@ -15,9 +15,6 @@ let package = Package(
             dependencies: ["SopranoGitCore"],
             path: "Sources/SopranoGit",
             exclude: ["Vendored/SOPRANO_COMMIT"],
-            resources: [
-                .copy("Resources/AppIcon.icns"),
-            ],
             linkerSettings: [
                 .linkedFramework("CoreServices"),
                 .linkedFramework("UniformTypeIdentifiers"),
