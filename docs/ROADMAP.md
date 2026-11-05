@@ -26,3 +26,14 @@ below come after that, roughly in this order.
 - AI actions via agent CLIs (commit message, explain commit, PR description).
 - ⌥T opens the repo in a Soprano tab; Agent Sessions view fed by Soprano's agent status.
 - ⌥ chords in keybindings (needs Option support in Soprano's `KeyChord`, then a sync).
+
+## Linux (Omarchy)
+
+Furkan moves to Omarchy (Arch Linux, Hyprland, Wayland) later. Today only macOS builds.
+
+- `SopranoGitCore` (about 2,600 lines, Foundation only, drives the `git` CLI) should build on
+  Linux nearly as is: build it (Swift through `swiftly`), with its own test target and a Linux
+  CI job.
+- The UI (about 25,200 lines of AppKit; CoreServices and UniformTypeIdentifiers for file
+  types) is rebuilt on the toolkit chosen once for the family, in Soprano first (every app
+  syncs its chrome from there).
