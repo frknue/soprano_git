@@ -29,11 +29,12 @@ below come after that, roughly in this order.
 
 ## Linux (Omarchy)
 
-Furkan moves to Omarchy (Arch Linux, Hyprland, Wayland) later. Today only macOS builds.
+Furkan wechselt später auf Omarchy (Arch Linux, Hyprland, Wayland). Heute baut die App nur auf
+macOS.
 
-- `SopranoGitCore` (about 2,600 lines, Foundation only, drives the `git` CLI) should build on
-  Linux nearly as is: build it (Swift through `swiftly`), with its own test target and a Linux
-  CI job.
-- The UI (about 25,200 lines of AppKit; CoreServices and UniformTypeIdentifiers for file
-  types) is rebuilt on the toolkit chosen once for the family, in Soprano first (every app
-  syncs its chrome from there).
+- `SopranoGitCore` (etwa 2.600 Zeilen, nur Foundation, steuert die `git`-CLI) sollte auf Linux
+  fast unverändert bauen: bauen (Swift über `swiftly`), mit eigenem Testtarget und einem
+  Linux-CI-Job.
+- Die UI (etwa 25.200 Zeilen AppKit; CoreServices und UniformTypeIdentifiers für Dateitypen)
+  wird auf dem Toolkit neu gebaut, das einmal für die ganze Familie gewählt wird, zuerst in
+  Soprano (jede App synct ihr Chrome von dort).
